@@ -35,18 +35,17 @@ type workerWrapper struct {
 	worker     TunnyWorker
 }
 
-/* TODO: As long as Ready is able to lock this loop entirely we cannot
- * guarantee that all go routines stop at pool.Close(), which totally
- * stinks.
- */
 func (wrapper *workerWrapper) Loop() {
+
+	// TODO: Configure?
+	tout := time.Duration(5)
 
 	for !wrapper.worker.Ready() {
 		// It's sad that we can't simply check if jobChan is closed here.
-		if atomic.LoadUint32(&(*wrapper).poolOpen) == 0 {
+		if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(tout * time.Millisecond)
 	}
 
 	wrapper.readyChan <- 1
@@ -54,38 +53,47 @@ func (wrapper *workerWrapper) Loop() {
 	for data := range wrapper.jobChan {
 		wrapper.outputChan <- wrapper.worker.Job( data )
 		for !wrapper.worker.Ready() {
-			if atomic.LoadUint32(&(*wrapper).poolOpen) == 0 {
+			if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
 				break
 			}
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(tout * time.Millisecond)
 		}
 		wrapper.readyChan <- 1
 	}
 
 	close(wrapper.readyChan)
 	close(wrapper.outputChan)
+
 }
 
 func (wrapper *workerWrapper) Open() {
-	if extWorker, ok := (*wrapper).worker.(TunnyExtendedWorker); ok {
+	if extWorker, ok := wrapper.worker.(TunnyExtendedWorker); ok {
 		extWorker.Initialize()
 	}
 
-	(*wrapper).readyChan  = make (chan int)
-	(*wrapper).jobChan    = make (chan interface{})
-	(*wrapper).outputChan = make (chan interface{})
+	wrapper.readyChan  = make (chan int)
+	wrapper.jobChan    = make (chan interface{})
+	wrapper.outputChan = make (chan interface{})
 
-	atomic.SwapUint32(&(*wrapper).poolOpen, uint32(1))
+	atomic.SwapUint32(&wrapper.poolOpen, uint32(1))
 
-	go (*wrapper).Loop()
+	go wrapper.Loop()
 }
 
+// Follow this with Join(), otherwise terminate isn't called on the worker
 func (wrapper *workerWrapper) Close() {
 	close(wrapper.jobChan)
+	atomic.SwapUint32(&wrapper.poolOpen, uint32(0))
+}
 
-	atomic.SwapUint32(&(*wrapper).poolOpen, uint32(0))
+func (wrapper *workerWrapper) Join() {
+	for {
+		if _, ok := <-wrapper.readyChan; !ok {
+			break;
+		}
+	}
 
-	if extWorker, ok := (*wrapper).worker.(TunnyExtendedWorker); ok {
+	if extWorker, ok := wrapper.worker.(TunnyExtendedWorker); ok {
 		extWorker.Terminate()
 	}
 }

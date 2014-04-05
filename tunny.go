@@ -198,7 +198,11 @@ func (pool *WorkPool) Close() error {
 	if pool.running {
 
 		for _, workerWrapper := range pool.workers {
-			(*workerWrapper).Close()
+			workerWrapper.Close()
+		}
+
+		for _, workerWrapper := range pool.workers {
+			workerWrapper.Join()
 		}
 
 		pool.running = false

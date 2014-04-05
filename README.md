@@ -205,7 +205,7 @@ You'll notice that as well as the important Job(data interface{}) interface{} ca
 
 For example, your worker could hold a counter of how many jobs it has done, and perhaps after a certain amount it should perform another act before taking on more work, it's important to use Ready for these occasions since blocking the Job call will hold up the waiting client.
 
-It is recommended that you do not block Ready() whilst you wait for some condition to change, since this can prevent the pool from closing the worker routines. Currently, Ready is called at 50 millisecond intervals until you answer true or the pool is closed.
+It is recommended that you do not block Ready() whilst you wait for some condition to change, since this can prevent the pool from closing the worker routines. Currently, Ready is called at 5 millisecond intervals until you answer true or the pool is closed.
 
 ##I need more control
 
