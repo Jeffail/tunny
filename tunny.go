@@ -62,36 +62,7 @@ type TunnyExtendedWorker interface {
 	Terminate()
 }
 
-type workerWrapper struct {
-	readyChan  chan int
-	jobChan    chan interface{}
-	outputChan chan interface{}
-	worker     TunnyWorker
-}
-
-/* TODO: As long as Ready is able to lock this loop entirely we cannot
- * guarantee that all go routines stop at pool.Close(), which totally
- * stinks.
- */
-func (wrapper *workerWrapper) Loop () {
-	for !wrapper.worker.Ready() {
-		time.Sleep(50 * time.Millisecond)
-	}
-	wrapper.readyChan <- 1
-	for data := range wrapper.jobChan {
-		wrapper.outputChan <- wrapper.worker.Job( data )
-		for !wrapper.worker.Ready() {
-			time.Sleep(50 * time.Millisecond)
-		}
-		wrapper.readyChan <- 1
-	}
-	close(wrapper.readyChan)
-	close(wrapper.outputChan)
-}
-
-func (wrapper *workerWrapper) Close () {
-	close(wrapper.jobChan)
-}
+// Default implementation of worker
 
 type tunnyDefaultWorker struct {
 	job *func(interface{}) (interface{})
@@ -122,7 +93,7 @@ SendWorkTimed - Send a job to a worker and return the result, this is a blocking
 SendWorkTimed - Args:    milliTimeout time.Duration, jobData interface{}
 SendWorkTimed - Summary: the timeout period in milliseconds, the input data for the worker to process
 */
-func (pool *WorkPool) SendWorkTimed (milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
+func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
@@ -171,7 +142,7 @@ SendWork - Send a job to a worker and return the result, this is a blocking call
 SendWork - Args:    jobData interface{}
 SendWork - Summary: the input data for the worker to process
 */
-func (pool *WorkPool) SendWork (jobData interface{}) (interface{}, error) {
+func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
 
@@ -192,7 +163,7 @@ func (pool *WorkPool) SendWork (jobData interface{}) (interface{}, error) {
 /*
 Open - Open all channels and launch the background goroutines managed by the pool.
 */
-func (pool *WorkPool) Open () (*WorkPool, error) {
+func (pool *WorkPool) Open() (*WorkPool, error) {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
 
@@ -201,20 +172,12 @@ func (pool *WorkPool) Open () (*WorkPool, error) {
 		pool.selects = make( []reflect.SelectCase, len(pool.workers) )
 
 		for i, workerWrapper := range pool.workers {
-			(*workerWrapper).readyChan  = make (chan int)
-			(*workerWrapper).jobChan    = make (chan interface{})
-			(*workerWrapper).outputChan = make (chan interface{})
+			(*workerWrapper).Open()
 
 			pool.selects[i] = reflect.SelectCase {
 				Dir: reflect.SelectRecv,
 				Chan: reflect.ValueOf((*workerWrapper).readyChan),
 			}
-
-			if extWorker, ok := (*workerWrapper).worker.(TunnyExtendedWorker); ok {
-				extWorker.Initialize()
-			}
-
-			go (*workerWrapper).Loop()
 		}
 
 		pool.running = true
@@ -228,7 +191,7 @@ func (pool *WorkPool) Open () (*WorkPool, error) {
 /*
 Close - Close all channels and goroutines managed by the pool.
 */
-func (pool *WorkPool) Close () error {
+func (pool *WorkPool) Close() error {
 	pool.mutex.Lock()
 	defer pool.mutex.Unlock()
 
@@ -236,10 +199,8 @@ func (pool *WorkPool) Close () error {
 
 		for _, workerWrapper := range pool.workers {
 			(*workerWrapper).Close()
-			if extWorker, ok := (*workerWrapper).worker.(TunnyExtendedWorker); ok {
-				extWorker.Terminate()
-			}
 		}
+
 		pool.running = false
 		return nil
 
@@ -253,7 +214,7 @@ CreatePool - Creates a pool of workers.
 CreatePool - Args:    numWorkers int,    job func(interface{}) (interface{})
 CreatePool - Summary: number of threads, the closure to run for each job
 */
-func CreatePool (numWorkers int, job func(interface{}) interface{}) *WorkPool {
+func CreatePool(numWorkers int, job func(interface{}) interface{}) *WorkPool {
 	pool := WorkPool { running: false }
 
 	pool.workers = make ([]*workerWrapper, numWorkers)
@@ -272,7 +233,7 @@ CreatePoolGeneric - Creates a pool of generic workers, they take a func as their
 CreatePoolGeneric - Args:    numWorkers int
 CreatePoolGeneric - Summary: number of threads
 */
-func CreatePoolGeneric (numWorkers int) *WorkPool {
+func CreatePoolGeneric(numWorkers int) *WorkPool {
 
 	return CreatePool(numWorkers, func (jobCall interface{}) interface{} {
 		if method, ok := jobCall.(func()); ok {
@@ -289,7 +250,7 @@ CreateCustomPool - Creates a pool for an array of custom workers.
 CreateCustomPool - Args:    customWorkers []TunnyWorker
 CreateCustomPool - Summary: An array of workers to use in the pool, each worker gets its own thread
 */
-func CreateCustomPool (customWorkers []TunnyWorker) *WorkPool {
+func CreateCustomPool(customWorkers []TunnyWorker) *WorkPool {
 	pool := WorkPool { running: false }
 
 	pool.workers = make ([]*workerWrapper, len(customWorkers))

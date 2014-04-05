@@ -28,7 +28,7 @@ import (
 	"runtime"
 )
 
-func TestTimeout (t *testing.T) {
+func TestTimeout(t *testing.T) {
 	outChan  := make(chan int, 3)
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
@@ -82,7 +82,7 @@ func TestTimeout (t *testing.T) {
 	}
 }
 
-func TestTimeoutRequests (t *testing.T) {
+func TestTimeoutRequests(t *testing.T) {
 	n_polls := 200
 	outChan  := make(chan int, n_polls)
 
@@ -111,7 +111,7 @@ func TestTimeoutRequests (t *testing.T) {
 	}
 }
 
-func validateReturnInt (t *testing.T, expecting int, object interface{}) {
+func validateReturnInt(t *testing.T, expecting int, object interface{}) {
 	if w, ok := object.(int); ok {
 		if w != expecting {
 			t.Errorf("Wrong, expected %v, got %v", expecting, w)
@@ -121,7 +121,7 @@ func validateReturnInt (t *testing.T, expecting int, object interface{}) {
 	}
 }
 
-func TestBasic (t *testing.T) {
+func TestBasic(t *testing.T) {
 	sizePool, repeats, sleepFor, margin := 16, 2, 250, 100
 	outChan  := make(chan int, sizePool)
 
@@ -167,7 +167,7 @@ func TestBasic (t *testing.T) {
 	}
 }
 
-func TestGeneric (t *testing.T) {
+func TestGeneric(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	if pool, err := CreatePoolGeneric(10).Open(); err == nil {
@@ -212,7 +212,7 @@ func TestGeneric (t *testing.T) {
 
 }
 
-func TestExampleCase (t *testing.T) {
+func TestExampleCase(t *testing.T) {
 	outChan  := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -268,7 +268,7 @@ func (worker *customWorker) Job(data interface{}) interface{} {
 	return nil
 }
 
-func TestCustomWorkers (t *testing.T) {
+func TestCustomWorkers(t *testing.T) {
 	outChan  := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -353,7 +353,7 @@ func (worker *customExtendedWorker) Terminate() {
 	(*worker).asleep = true
 }
 
-func TestCustomExtendedWorkers (t *testing.T) {
+func TestCustomExtendedWorkers(t *testing.T) {
 	outChan  := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 

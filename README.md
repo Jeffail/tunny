@@ -201,11 +201,31 @@ func TestCustomWorkers (t *testing.T) {
 ...
 ```
 
-You'll notice that as well as the important Job(data interface{}) interface{} call to implement there is also the call Ready() bool. Ready is potentially an important part of the TunnyWorker that allows you to use your state to determine whether or not this worker should take on another job yet, and answer true or false accordingly.
+You'll notice that as well as the important Job(data interface{}) interface{} call to implement there is also the call Ready() bool. Ready is potentially an important part of the TunnyWorker that allows you to use your state to determine whether or not this worker should take on another job, and answer true or false accordingly.
 
 For example, your worker could hold a counter of how many jobs it has done, and perhaps after a certain amount it should perform another act before taking on more work, it's important to use Ready for these occasions since blocking the Job call will hold up the waiting client.
 
-You can block Ready whilst you wait for some condition to change, or alternatively you can return a true/false straight away, in this case the call will be repeated at 50 millisecond intervals until you answer true.
+It is recommended that you do not block Ready() whilst you wait for some condition to change, since this can prevent the pool from closing the worker routines. Currently, Ready is called at 50 millisecond intervals until you answer true or the pool is closed.
+
+##I need more control
+
+You crazy fool, let's take this up to the next level. You can optionally implement these methods...
+
+```go
+...
+
+// This is called on each worker when pool.Open is activated, jobs will begin to arrive afterwards.
+func (worker *customWorker) Initialize() {
+	// Do stuff
+}
+
+// This is called on each worker when pool.Close is activated, jobs will have already stopped by this point. Use it as an opportunity to clean yourself up.
+func (worker *customWorker) Terminate() {
+	// Undo stuff
+}
+
+...
+```
 
 ##So where do I actually benefit from using tunny?
 
