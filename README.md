@@ -1,4 +1,4 @@
-![Tunny](http://www.creepybit.co.uk/images/tunny_logo_small.png?v=1 "Tunny")
+![Tunny](http://www.creepybit.co.uk/images/tunny_logo_small.png?v=2 "Tunny")
 
 Tunny is a golang library for creating and managing a thread pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and also trashy.
 
