@@ -28,8 +28,18 @@ import (
 	"runtime"
 )
 
+/* time.Sleep seems to be spawning a goroutine that doesn't stop. This is fine and stuff
+ * but tunny tests do a comparisson of runtime.NumGoroutine before and after to make sure
+ * that goroutines aren't being left open after .Close(), so this test simply opens that
+ * goroutine beforehand.
+ */
+func TestTestTestyTestAllTheTestsNeedTesting(t * testing.T) {
+	time.Sleep(time.Millisecond)
+}
+
 func TestTimeout(t *testing.T) {
 	outChan  := make(chan int, 3)
+	routines := runtime.NumGoroutine()
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(500 * time.Millisecond)
@@ -40,8 +50,6 @@ func TestTimeout(t *testing.T) {
 		t.Errorf("Error starting pool: ", errPool)
 		return
 	}
-
-	defer pool.Close()
 
 	before := time.Now()
 
@@ -80,11 +88,18 @@ func TestTimeout(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		<-outChan
 	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
 }
 
 func TestTimeoutRequests(t *testing.T) {
-	n_polls := 200
+	n_polls  := 200
 	outChan  := make(chan int, n_polls)
+	routines := runtime.NumGoroutine()
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(time.Millisecond)
@@ -96,8 +111,6 @@ func TestTimeoutRequests(t *testing.T) {
 		return
 	}
 
-	defer pool.Close()
-
 	for i := 0; i < n_polls; i++ {
 		if _, err := pool.SendWorkTimed(50, nil); err == nil {
 		} else {
@@ -108,6 +121,12 @@ func TestTimeoutRequests(t *testing.T) {
 
 	for i := 0; i < n_polls; i++ {
 		<-outChan
+	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
 	}
 }
 
@@ -124,6 +143,7 @@ func validateReturnInt(t *testing.T, expecting int, object interface{}) {
 func TestBasic(t *testing.T) {
 	sizePool, repeats, sleepFor, margin := 16, 2, 250, 100
 	outChan  := make(chan int, sizePool)
+	routines := runtime.NumGoroutine()
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -139,8 +159,6 @@ func TestBasic(t *testing.T) {
 		t.Errorf("Error starting pool: ", errPool)
 		return
 	}
-
-	defer pool.Close()
 
 	for i := 0; i < sizePool * repeats; i++ {
 		go func() {
@@ -165,14 +183,19 @@ func TestBasic(t *testing.T) {
 	if taken > expected {
 		t.Errorf("Wrong, should have taken less than %v seconds, actually took %v", expected, taken)
 	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
 }
 
 func TestGeneric(t *testing.T) {
+	routines := runtime.NumGoroutine()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	if pool, err := CreatePoolGeneric(10).Open(); err == nil {
-		defer pool.Close()
-
 		outChan  := make(chan int, 10)
 
 		for i := 0; i < 10; i++ {
@@ -205,15 +228,21 @@ func TestGeneric(t *testing.T) {
 			results[value] = 1
 		}
 
+		pool.Close()
+
 	} else {
 		t.Errorf("Error starting pool: ", err)
 		return
 	}
 
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
 }
 
 func TestExampleCase(t *testing.T) {
 	outChan  := make(chan int, 10)
+	routines := runtime.NumGoroutine()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	pool, errPool := CreatePool(4, func(object interface{}) interface{} {
@@ -227,8 +256,6 @@ func TestExampleCase(t *testing.T) {
 		t.Errorf("Error starting pool: ", errPool)
 		return
 	}
-
-	defer pool.Close()
 
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -246,6 +273,12 @@ func TestExampleCase(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		<-outChan
+	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
 	}
 }
 
@@ -270,6 +303,8 @@ func (worker *customWorker) Job(data interface{}) interface{} {
 
 func TestCustomWorkers(t *testing.T) {
 	outChan  := make(chan int, 10)
+	routines := runtime.NumGoroutine()
+
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	workers := make([]TunnyWorker, 4)
@@ -325,6 +360,10 @@ func TestCustomWorkers(t *testing.T) {
 	if totalJobs != 10 {
 		t.Errorf("Total jobs expected: %v, actual: %v", 10, totalJobs)
 	}
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
 }
 
 type customExtendedWorker struct {
@@ -355,6 +394,7 @@ func (worker *customExtendedWorker) Terminate() {
 
 func TestCustomExtendedWorkers(t *testing.T) {
 	outChan  := make(chan int, 10)
+	routines := runtime.NumGoroutine()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	extWorkers   := make([]*customExtendedWorker, 4)
@@ -422,5 +462,9 @@ func TestCustomExtendedWorkers(t *testing.T) {
 				t.Errorf("Worker is still awake!")
 			}
 		}
+	}
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
 	}
 }
