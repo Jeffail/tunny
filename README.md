@@ -1,8 +1,8 @@
 ![Tunny](http://www.creepybit.co.uk/images/tunny_logo_small.png?v=2 "Tunny")
 
-Tunny is a golang library for creating and managing a thread pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and also trashy.
+Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and also trashy.
 
-Use cases for tunny are any situation where a large flood of jobs are imminent, potentially from different threads, and you need to bottleneck those jobs through a fixed number of dedicated worker threads. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing the threads from foolishly competing with each other for CPU time.
+Use cases for tunny are any situation where a large flood of jobs are imminent, potentially from different goroutines, and you need to bottleneck those jobs through a fixed number of dedicated worker routines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
 
 ##How to install:
 
@@ -89,7 +89,7 @@ exampleChannel := make(chan int)
 pool, _ := tunny.CreatePoolGeneric(numCPUs).Open()
 
 err := pool.SendWork(func() {
-	/* Do your hard work here, usual rules of enclosures apply here,
+	/* Do your hard work here, usual rules of closures apply here,
 	 * so you can return values like so:
 	 */
 	exampleChannel <- 10
@@ -214,12 +214,16 @@ You crazy fool, let's take this up to the next level. You can optionally impleme
 ```go
 ...
 
-// This is called on each worker when pool.Open is activated, jobs will begin to arrive afterwards.
+/* This is called on each worker when pool.Open is activated, jobs will begin to
+ * arrive afterwards.
+ */
 func (worker *customWorker) Initialize() {
 	// Do stuff
 }
 
-// This is called on each worker when pool.Close is activated, jobs will have already stopped by this point. Use it as an opportunity to clean yourself up.
+/* This is called on each worker when pool.Close is activated, jobs will have
+ * already stopped by this point. Use it as an opportunity to clean yourself up.
+ */
 func (worker *customWorker) Terminate() {
 	// Undo stuff
 }
