@@ -20,27 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-/*
-Package tunny implements a simple pool for maintaining independant worker threads.
-Here's a simple example of tunny in action, creating a four threaded worker pool:
-
-pool := tunny.CreatePool(4, func( object interface{} ) ( interface{} ) {
-	if w, ok := object.(int); ok {
-		return w * 2
-	}
-	return "Not an int!"
-}).Open()
-
-defer pool.Close()
-
-// pool.SendWork is thread safe, so it can be called from another pool of go routines.
-// This call blocks until a worker is ready and has completed the job
-out, err := pool.SendWork(50)
-
-// This call blocks until either a result is obtained or the specified timeout period
-// (5000 milliseconds) occurs.
-out2, err2 := pool.SendWorkTimed(5000, 50)
-*/
+// Package tunny implements a simple pool for maintaining independant worker goroutines.
 package tunny
 
 import (
@@ -119,7 +99,7 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 				case <- time.After((milliTimeout * time.Millisecond) - time.Since(before)):
 					/* If we time out here we also need to ensure that the output is still
 					 * collected and that the worker can move on. Therefore, we fork the
-					 * waiting process into a new thread.
+					 * waiting process into a new goroutine.
 					 */
 					go func() {
 						<-(*pool.workers[chosen]).outputChan
@@ -216,7 +196,7 @@ func (pool *WorkPool) Close() error {
 /*
 CreatePool - Creates a pool of workers.
 CreatePool - Args:    numWorkers int,    job func(interface{}) (interface{})
-CreatePool - Summary: number of threads, the closure to run for each job
+CreatePool - Summary: number of workers, the closure to run for each job
 */
 func CreatePool(numWorkers int, job func(interface{}) interface{}) *WorkPool {
 	pool := WorkPool { running: false }
@@ -235,7 +215,7 @@ func CreatePool(numWorkers int, job func(interface{}) interface{}) *WorkPool {
 /*
 CreatePoolGeneric - Creates a pool of generic workers, they take a func as their only argument and execute it.
 CreatePoolGeneric - Args:    numWorkers int
-CreatePoolGeneric - Summary: number of threads
+CreatePoolGeneric - Summary: number of workers
 */
 func CreatePoolGeneric(numWorkers int) *WorkPool {
 
@@ -252,7 +232,7 @@ func CreatePoolGeneric(numWorkers int) *WorkPool {
 /*
 CreateCustomPool - Creates a pool for an array of custom workers.
 CreateCustomPool - Args:    customWorkers []TunnyWorker
-CreateCustomPool - Summary: An array of workers to use in the pool, each worker gets its own thread
+CreateCustomPool - Summary: An array of workers to use in the pool, each worker gets its own goroutine
 */
 func CreateCustomPool(customWorkers []TunnyWorker) *WorkPool {
 	pool := WorkPool { running: false }

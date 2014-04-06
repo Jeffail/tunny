@@ -2,7 +2,7 @@
 
 Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and also trashy.
 
-Use cases for tunny are any situation where a large flood of jobs are imminent, potentially from different goroutines, and you need to bottleneck those jobs through a fixed number of dedicated worker routines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
+Use cases for tunny are any situation where a large flood of jobs are imminent, potentially from different goroutines, and you need to bottleneck those jobs through a fixed number of dedicated worker goroutines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
 
 ##How to install:
 
@@ -48,12 +48,12 @@ func CalcRoots (inputs []float64) []float64 {
 
     defer pool.Close()
 
-    /* Creates a go routine for all jobs, these will be blocked until
+    /* Creates a goroutine for all jobs, these will be blocked until
 	 * a worker is available and has finished the request.
      */
     for i := 0; i < numJobs; i++ {
         go func(index int) {
-            // SendWork is thread safe. Go ahead and call it from any go routine
+            // SendWork is thread safe. Go ahead and call it from any goroutine
             if value, err2 := pool.SendWork(inputs[index]); err2 == nil {
                 if result, ok := value.(float64); ok {
                     outputs[index] = result
@@ -75,7 +75,7 @@ func CalcRoots (inputs []float64) []float64 {
 
 ```
 
-This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's go routines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but at least you don't have to write it all yourself you lazy scum.
+This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's goroutines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but at least you don't have to write it all yourself you lazy scum.
 
 ##Can I specify the job for each work call?
 
@@ -124,7 +124,7 @@ if value, err := pool.SendWorkTimed(500, inputs[index]); err == nil {
 ...
 ```
 
-This snippet will send the job, and wait for up to 500 milliseconds for an answer. You could optionally implement a timeout yourself by starting a new go routine that returns the output through a channel, and having that channel compete with time.After().
+This snippet will send the job, and wait for up to 500 milliseconds for an answer. You could optionally implement a timeout yourself by starting a new goroutine that returns the output through a channel, and having that channel compete with time.After().
 
 You'd be an idiot for doing that though because you would be forcing the pool to send work to a worker even if the timeout occured whilst waiting for a worker to become available, you muppet!
 
@@ -150,7 +150,7 @@ func (worker *customWorker) Ready() bool {
 func (worker *customWorker) Job(data interface{}) interface{} {
     /* TODO: Use and modify state
      * there's no need for thread safety paradigms here unless the
-	 * data is being accessed from another go routine outside of
+	 * data is being accessed from another goroutine outside of
 	 * the pool.
      */
     if outputStr, ok := data.(string); ok {
@@ -205,7 +205,7 @@ You'll notice that as well as the important Job(data interface{}) interface{} ca
 
 For example, your worker could hold a counter of how many jobs it has done, and perhaps after a certain amount it should perform another act before taking on more work, it's important to use Ready for these occasions since blocking the Job call will hold up the waiting client.
 
-It is recommended that you do not block Ready() whilst you wait for some condition to change, since this can prevent the pool from closing the worker routines. Currently, Ready is called at 5 millisecond intervals until you answer true or the pool is closed.
+It is recommended that you do not block Ready() whilst you wait for some condition to change, since this can prevent the pool from closing the worker goroutines. Currently, Ready is called at 5 millisecond intervals until you answer true or the pool is closed.
 
 ##I need more control
 
