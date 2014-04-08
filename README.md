@@ -1,6 +1,6 @@
 ![Tunny](http://www.creepybit.co.uk/images/tunny_logo_small.png?v=2 "Tunny")
 
-Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and also trashy.
+Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and stuff.
 
 Use cases for tunny are any situation where a large flood of jobs are imminent, potentially from different goroutines, and you need to bottleneck those jobs through a fixed number of dedicated worker goroutines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
 
@@ -12,7 +12,7 @@ go get github.com/jeffail/tunny
 
 ##How to use:
 
-Here's a simple example of tunny being used to distribute a batch of calculations to a pool of workers that matches the number of CPU's:
+Here's an example of tunny being used to distribute a batch of calculations to a pool of workers that matches the number of CPU's:
 
 ```go
 ...
@@ -75,7 +75,7 @@ func CalcRoots (inputs []float64) []float64 {
 
 ```
 
-This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's goroutines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but at least you don't have to write it all yourself you lazy scum.
+This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's goroutines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but the example serves well as a demonstration of the API.
 
 ##Can I specify the job for each work call?
 
@@ -234,3 +234,19 @@ func (worker *customWorker) Terminate() {
 ##So where do I actually benefit from using tunny?
 
 You don't, I'm not a god damn charity.
+
+##Behaviours and caveats:
+
+#- Workers request jobs on an ad-hoc basis
+
+When there is a backlog of jobs waiting to be serviced, and all workers are occupied, a job will not be assigned to a worker until it is already prepared for its next job. This means workers do not develop their own individual queues. Instead, the backlog is shared by the entire pool.
+
+This means an individual worker is able to halt, or spend exceptional lengths of time on a single request without hindering the flow of any other requests, provided there are other active workers in the pool.
+
+#- A job can be dropped before work is begun
+
+Tunny has support for specified timeouts at the work request level, if this timeout is triggered whilst waiting for a worker to become available then the request is dropped entirely and no effort is wasted on the abandoned request.
+
+#- A job request is unprioritized
+
+The incoming requests are not prioritized in any way, if the current work load is beyond the capacity of the pool then the remaining jobs are selected at random.
