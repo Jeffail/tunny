@@ -87,9 +87,8 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 		})
 
 		// Wait for workers, or time out
-		chosen, _, ok := reflect.Select(selectCases)
-		if ( ok ) {
-			if ( chosen < ( len(selectCases) - 1 ) ) {
+		if chosen, _, ok := reflect.Select(selectCases); ok {
+			if chosen < ( len(selectCases) - 1 ) {
 				(*pool.workers[chosen]).jobChan <- jobData
 
 				// Wait for response, or time out
@@ -118,6 +117,26 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 }
 
 /*
+SendWorkTimedAsync - Send a timed job to a worker without blocking, and send the result to a receiving closure.
+SendWorkTimedAsync - Args:    milliTimeout time.Duration, jobData interface{}, after func(interface{}, error)
+SendWorkTimedAsync - Summary: the timeout period in milliseconds
+SendWorkTimedAsync - Summary: the input data for the worker to process
+SendWorkTimedAsync - Summary: the closure to hand the result to
+*/
+func (pool *WorkPool) SendWorkTimedAsync(
+	milliTimeout time.Duration,
+	jobData interface{},
+	after func(interface{}, error),
+) {
+	go func() {
+		result, err := pool.SendWorkTimed(milliTimeout, jobData)
+		if after != nil {
+			after(result, err)
+		}
+	}()
+}
+
+/*
 SendWork - Send a job to a worker and return the result, this is a blocking call.
 SendWork - Args:    jobData interface{}
 SendWork - Summary: the input data for the worker to process
@@ -138,6 +157,20 @@ func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 	} else {
 		return nil, errors.New("Pool is not running! Call Open() before sending work")
 	}
+}
+
+/*
+SendWorkAsync - Send a job to a worker without blocking, and send the result to a receiving closure.
+SendWorkAsync - Args:    jobData interface{}, after func(interface{}, error)
+SendWorkAsync - Summary: the input data for the worker to process, the closure to hand the result to
+*/
+func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
+	go func() {
+		result, err := pool.SendWork(jobData)
+		if after != nil {
+			after(result, err)
+		}
+	}()
 }
 
 /*

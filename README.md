@@ -2,7 +2,9 @@
 
 Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and stuff.
 
-Use cases for tunny are any situation where a large flood of jobs are imminent, potentially from different goroutines, and you need to bottleneck those jobs through a fixed number of dedicated worker goroutines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
+Use cases for tunny are any situation where a large and possibly constant flood of jobs are imminent but indeterminate and you need to bottleneck those jobs through a fixed number of dedicated worker goroutines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
+
+Tunny helps the most when either the input jobs arrive at an inconsistent rate (from http clients, for example) or the jobs themselves vary greatly in processing time (like language detection or sentiment analysis).
 
 ##How to install:
 
@@ -12,63 +14,61 @@ go get github.com/jeffail/tunny
 
 ##How to use:
 
-Here's an example of tunny being used to distribute a batch of calculations to a pool of workers that matches the number of CPU's:
+Here's an example of tunny being used to distribute a batch of calculations to a pool of workers that matches the number of CPU's, ignoring errors for simplicity:
 
 ```go
 ...
 
-import "github.com/jeffail/tunny"
+import (
+	"github.com/jeffail/tunny"
+	"sync"
+)
 
 ...
 
 func CalcRoots (inputs []float64) []float64 {
-    numCPUs  := runtime.NumCPU()
-    numJobs  := len(inputs)
-    doneChan := make( chan int,  numJobs )
-    outputs  := make( []float64, numJobs )
+	numCPUs  := runtime.NumCPU()
+	numJobs  := len(inputs)
+	outputs  := make( []float64, numJobs )
 
-    runtime.GOMAXPROCS(numCPUs)
+	wg := new(sync.WaitGroup)
+	wg.Add(numJobs)
 
-    /* Create the pool, and specify the job each worker should perform,
+	runtime.GOMAXPROCS(numCPUs)
+
+	/* Create the pool, and specify the job each worker should perform,
 	 * if each worker needs to carry its own state then this can also
 	 * be accomplished, read on.
-     */
-    pool, err := tunny.CreatePool(numCPUs, func( object interface{} ) ( interface{} ) {
-        if value, ok := object.(float64); ok {
-            // Hard work here
-            return math.Sqrt(value)
-        }
-        return nil
-    }).Open()
+	 */
+	pool, _ := tunny.CreatePool(numCPUs, func( object interface{} ) ( interface{} ) {
 
-    if err != nil {
-        fmt.Fprintln(os.Stderr, "Error starting pool: ", err)
-        return nil
-    }
+		// Hard work here
+		value, _ := object.(float64)
+		return math.Sqrt(value)
 
-    defer pool.Close()
+	}).Open()
 
-    /* Creates a goroutine for all jobs, these will be blocked until
+	defer pool.Close()
+
+	/* Creates a goroutine for all jobs, these will be blocked until
 	 * a worker is available and has finished the request.
-     */
-    for i := 0; i < numJobs; i++ {
-        go func(index int) {
-            // SendWork is thread safe. Go ahead and call it from any goroutine
-            if value, err2 := pool.SendWork(inputs[index]); err2 == nil {
-                if result, ok := value.(float64); ok {
-                    outputs[index] = result
-                }
-            }
-            doneChan <- 1
-        }(i)
-    }
+	 */
+	for i := 0; i < numJobs; i++ {
+		go func(index int) {
 
-    // Wait for all jobs to be completed before closing the pool
-    for i := 0; i < numJobs; i++ {
-        <-doneChan
-    }
+			// SendWork is thread safe and synchronous. Call it from any goroutine.
+			value, _ := pool.SendWork(inputs[index])
+			outputs[index], _ = value.(float64)
 
-    return outputs
+			wg.Done()
+
+		}(i + 10)
+	}
+
+	// Wait for all jobs to be completed before closing the pool
+	wg.Wait()
+
+	return outputs
 }
 
 ...
@@ -112,13 +112,13 @@ To make pool calls adhere to a timeout period of your choice simply swap the cal
 // SendWorkTimed takes an argument for a timeout in milliseconds.
 // If this timeout triggers the call will return with an error
 if value, err := pool.SendWorkTimed(500, inputs[index]); err == nil {
-	if result, ok := value.(float64); ok {
-		outputs[index] = result
-	}
+
+	outputs[index], _ = value.(float64)
+
 } else {
-/* A timeout most likely occured, I haven't checked this specifically because
- * I am a lazy garbage mongler.
- */
+	/* A timeout most likely occured, I haven't checked this specifically because
+	 * I am a lazy garbage mongler.
+	 */
 }
 
 ...
@@ -138,64 +138,65 @@ Here is a short example:
 ...
 
 type customWorker struct {
-    // TODO: Put some state here
+	// TODO: Put some state here
 }
 
 // Use this call to block further jobs if necessary
 func (worker *customWorker) Ready() bool {
-    return true
+	return true
 }
 
 // This is where the work actually happens
 func (worker *customWorker) Job(data interface{}) interface{} {
-    /* TODO: Use and modify state
-     * there's no need for thread safety paradigms here unless the
+	/* TODO: Use and modify state
+	 * there's no need for thread safety paradigms here unless the
 	 * data is being accessed from another goroutine outside of
 	 * the pool.
-     */
-    if outputStr, ok := data.(string); ok {
-        return ("custom job done: " + outputStr )
-    }
-    return nil
+	 */
+	if outputStr, ok := data.(string); ok {
+		return ("custom job done: " + outputStr )
+	}
+	return nil
 }
 
 func TestCustomWorkers (t *testing.T) {
-    outChan  := make(chan int, 10)
+	outChan  := make(chan int, 10)
 
-    workers := make([]tunny.TunnyWorker, 4)
-    for i, _ := range workers {
-        workers[i] = &(customWorker{})
-    }
+	workers := make([]tunny.TunnyWorker, 4)
+	for i, _ := range workers {
+		workers[i] = &(customWorker{})
+	}
 
-    pool, errPool := tunny.CreateCustomPool(workers).Open()
+	pool, errPool := tunny.CreateCustomPool(workers).Open()
 
-    if errPool != nil {
-        t.Errorf("Error starting pool: ", errPool)
-        return
-    }
+	if errPool != nil {
+		t.Errorf("Error starting pool: ", errPool)
+		return
+	}
 
-    defer pool.Close()
+	defer pool.Close()
 
-    for i := 0; i < 10; i++ {
-        go func() {
-            if value, err := pool.SendWork("hello world"); err == nil {
-                if str, ok := value.(string); ok {
-                    if str != "custom job done: hello world" {
-                        t.Errorf("Unexpected output from custom worker")
-                    }
-                } else {
-                    t.Errorf("Not a string!")
-                }
-            } else {
-                t.Errorf("Error returned: ", err)
-            }
-            outChan <- 1
-        }()
-    }
+	for i := 0; i < 10; i++ {
+		go func() {
+			if value, err := pool.SendWork("hello world"); err != nil {
 
-    for i := 0; i < 10; i++ {
-        <-outChan
-    }
+				t.Errorf("Error returned: ", err)
+
+			} else {
+
+				str, _ := value.(string)
+				if "custom job done: hello world" != str {
+					t.Errorf("Unexpected output from custom worker")
+				}
+
+			}
+			outChan <- 1
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		<-outChan
+	}
 }
 
 ...
@@ -230,6 +231,12 @@ func (worker *customWorker) Terminate() {
 
 ...
 ```
+
+##Can SendWork be called asynchronously?
+
+There is a helper function SendWorkAsync and SendWorkTimedAsync, that are the same as their respective sync calls with an optional second argument func(interface{}, error), this is the call made when a result is returned and can be nil if there is no need for the closure.
+
+However, if you find yourself in a situation where the sync return is not necessary then chances are you don't actually need Tunny at all. Golang is all about making concurrent programming simple by nature, and using Tunny for implementing simple async worker calls defeats the great work of the language spec and adds overhead that isn't necessary.
 
 ##So where do I actually benefit from using tunny?
 

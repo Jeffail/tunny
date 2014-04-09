@@ -468,3 +468,84 @@ func TestCustomExtendedWorkers(t *testing.T) {
 		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
 	}
 }
+
+func TestAsyncCalls(t *testing.T) {
+	routines := runtime.NumGoroutine()
+
+	numWorkers, numData := 4, 400
+	outChan := make(chan int, numData)
+
+	pool, err := CreatePool(numWorkers, func(data interface{}) interface{} {
+		if intData, ok := data.(int); ok {
+			time.Sleep(time.Millisecond * 5)
+			outChan <- intData
+			return intData
+		} else {
+			t.Errorf("Not and int!")
+		}
+		return nil
+	}).Open()
+
+	if err != nil {
+		t.Errorf("Error starting pool: ", err)
+		return
+	}
+
+	for i := 0; i < numData; i++ {
+		pool.SendWorkAsync(i, nil)
+	}
+
+	for i := 0; i < numData; i++ {
+		<-outChan
+	}
+
+	pool.Close()
+
+	pool.Open()
+
+	for i := 0; i < numData; i++ {
+		pool.SendWorkAsync(i, func(val interface{}, workErr error) {
+			if workErr != nil {
+				t.Errorf("Error: %v, ", workErr)
+			}
+			if _, ok := val.(int); !ok {
+				t.Errorf("Not and int!")
+			}
+		})
+	}
+
+	for i := 0; i < numData; i++ {
+		<-outChan
+	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
+}
+
+/*
+
+Test template
+
+func Test(t *testing.T) {
+	routines := runtime.NumGoroutine()
+
+	pool, poolErr := CreatePool(numWorkers, func(data interface{}) interface{} {
+	}).Open()
+
+	if poolErr != nil {
+		t.Errorf("Error starting pool: ", poolErr)
+		return
+	}
+
+	// TEST HERE
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
+}
+*/
