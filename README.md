@@ -72,7 +72,6 @@ func CalcRoots (inputs []float64) []float64 {
 }
 
 ...
-
 ```
 
 This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's goroutines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but the example serves well as a demonstration of the API.
@@ -234,9 +233,44 @@ func (worker *customWorker) Terminate() {
 
 ##Can SendWork be called asynchronously?
 
-There is a helper function SendWorkAsync and SendWorkTimedAsync, that are the same as their respective sync calls with an optional second argument func(interface{}, error), this is the call made when a result is returned and can be nil if there is no need for the closure.
+There are the helper functions SendWorkAsync and SendWorkTimedAsync, that are the same as their respective sync calls with an optional second argument func(interface{}, error), this is the call made when a result is returned and can be nil if there is no need for the closure.
 
 However, if you find yourself in a situation where the sync return is not necessary then chances are you don't actually need Tunny at all. Golang is all about making concurrent programming simple by nature, and using Tunny for implementing simple async worker calls defeats the great work of the language spec and adds overhead that isn't necessary.
+
+Here's a quick example:
+
+```go
+...
+
+outputChan := make(chan string)
+
+pool, _ := tunny.CreatePoolGeneric(4).Open();
+
+for i := 0; i < 100; i++ {
+	pool.SendWorkAsync(func() {
+
+		// Work here
+		outputChan <- doHardJobOrWhatever()
+
+	}, nil) // nil here because the result is returned in the closure
+}
+
+pool.SendWorkAsync(func() {
+
+	// Extra job here, this is executed on the worker goroutine
+	DoThatThingWhatTakesLongButOnlyNeedsDoingOnce()
+
+}, func(result interface{}, err error) {
+
+	/* Called when the work is done, this is executed in a new goroutine.
+	 * Use this call to forward the result onwards without blocking the worker.
+	 */
+	DoThatOtherThing()
+
+})
+
+...
+```
 
 ##So where do I actually benefit from using tunny?
 
@@ -256,4 +290,6 @@ Tunny has support for specified timeouts at the work request level, if this time
 
 ###- A job request is unprioritized
 
-The incoming requests are not prioritized in any way, if the current work load is beyond the capacity of the pool then the remaining jobs are selected at random.
+The incoming requests are not prioritized in any way, if the current work load is beyond the capacity of the pool then the remaining jobs are selected at random. This is intentional because a pool with an increasing backlog and an orderly queue of jobs would favour requests that are closest to reaching a potential timeout. If all jobs are assumed to be of equal priority then the system suffers when favour is granted to the jobs most likely to be discarded before completion.
+
+The plan is to have this behaviour configurable, and interchangeble with an orderly queue.
