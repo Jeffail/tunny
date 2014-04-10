@@ -93,7 +93,10 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 
 				// Wait for response, or time out
 				select {
-				case data := <-(*pool.workers[chosen]).outputChan:
+				case data, open := <-(*pool.workers[chosen]).outputChan:
+					if !open {
+						return nil, errors.New("Worker was closed before reaching a result")
+					}
 					return data, nil
 				case <- time.After((milliTimeout * time.Millisecond) - time.Since(before)):
 					/* If we time out here we also need to ensure that the output is still
@@ -149,7 +152,12 @@ func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 
 		if chosen, _, ok := reflect.Select(pool.selects); ok && chosen >= 0 {
 			(*pool.workers[chosen]).jobChan <- jobData
-			return <- (*pool.workers[chosen]).outputChan, nil
+			result, open := <-(*pool.workers[chosen]).outputChan
+
+			if !open {
+				return nil, errors.New("Worker was closed before reaching a result")
+			}
+			return result, nil
 		}
 
 		return nil, errors.New("Failed to find or wait for a worker")
