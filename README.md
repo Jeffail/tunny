@@ -76,7 +76,7 @@ func CalcRoots (inputs []float64) []float64 {
 
 This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's goroutines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but the example serves well as a demonstration of the API.
 
-##Can I specify the job for each work call?
+##Can I send a closure instead of data?
 
 Yes, the arguments passed to the worker are boxed as interface{}, so this can actually be a func, you can implement this yourself, or if you're not bothered about return values you can use:
 
@@ -204,14 +204,14 @@ You crazy fool, let's take this up to the next level. You can optionally impleme
 /* This is called on each worker when pool.Open is activated, jobs will begin to
  * arrive afterwards.
  */
-func (worker *customWorker) Initialize() {
+func (worker *customWorker) TunnyInitialize() {
 	// Do stuff
 }
 
 /* This is called on each worker when pool.Close is activated, jobs will have
  * already stopped by this point. Use it as an opportunity to clean yourself up.
  */
-func (worker *customWorker) Terminate() {
+func (worker *customWorker) TunnyTerminate() {
 	// Undo stuff
 }
 

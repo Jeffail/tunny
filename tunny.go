@@ -52,10 +52,10 @@ An optional interface that can be implemented if the worker needs more control o
 type TunnyExtendedWorker interface {
 
 	// Called when the pool is opened, this will be called before any jobs are sent.
-	Initialize()
+	TunnyInitialize()
 
 	// Called when the pool is closed, this will be called after all jobs are completed.
-	Terminate()
+	TunnyTerminate()
 
 }
 

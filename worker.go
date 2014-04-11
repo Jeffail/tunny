@@ -68,7 +68,7 @@ func (wrapper *workerWrapper) Loop() {
 
 func (wrapper *workerWrapper) Open() {
 	if extWorker, ok := wrapper.worker.(TunnyExtendedWorker); ok {
-		extWorker.Initialize()
+		extWorker.TunnyInitialize()
 	}
 
 	wrapper.readyChan  = make (chan int)
@@ -96,7 +96,7 @@ func (wrapper *workerWrapper) Join() {
 	}
 
 	if extWorker, ok := wrapper.worker.(TunnyExtendedWorker); ok {
-		extWorker.Terminate()
+		extWorker.TunnyTerminate()
 	}
 }
 

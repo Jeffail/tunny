@@ -384,11 +384,11 @@ func (worker *customExtendedWorker) Ready() bool {
 	return !(*worker).asleep && ((*worker).jobsCompleted < 10)
 }
 
-func (worker *customExtendedWorker) Initialize() {
+func (worker *customExtendedWorker) TunnyInitialize() {
 	(*worker).asleep = false
 }
 
-func (worker *customExtendedWorker) Terminate() {
+func (worker *customExtendedWorker) TunnyTerminate() {
 	(*worker).asleep = true
 }
 
