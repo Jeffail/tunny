@@ -36,10 +36,12 @@ type TunnyWorker interface {
 }
 
 type TunnyExtendedWorker interface {
-	Job(interface{}) (interface{})
-	Ready() bool
 	Initialize()
 	Terminate()
+}
+
+type TunnyInteruptable interface {
+	TunnyInterupt()
 }
 
 // Default implementation of worker
@@ -89,11 +91,11 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 		// Wait for workers, or time out
 		if chosen, _, ok := reflect.Select(selectCases); ok {
 			if chosen < ( len(selectCases) - 1 ) {
-				(*pool.workers[chosen]).jobChan <- jobData
+				pool.workers[chosen].jobChan <- jobData
 
 				// Wait for response, or time out
 				select {
-				case data, open := <-(*pool.workers[chosen]).outputChan:
+				case data, open := <-pool.workers[chosen].outputChan:
 					if !open {
 						return nil, errors.New("Worker was closed before reaching a result")
 					}
@@ -104,7 +106,8 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 					 * waiting process into a new goroutine.
 					 */
 					go func() {
-						<-(*pool.workers[chosen]).outputChan
+						pool.workers[chosen].Interupt()
+						<-pool.workers[chosen].outputChan
 					}()
 					return nil, errors.New("Request timed out whilst waiting for job to complete")
 				}
@@ -151,8 +154,8 @@ func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 	if pool.running {
 
 		if chosen, _, ok := reflect.Select(pool.selects); ok && chosen >= 0 {
-			(*pool.workers[chosen]).jobChan <- jobData
-			result, open := <-(*pool.workers[chosen]).outputChan
+			pool.workers[chosen].jobChan <- jobData
+			result, open := <-pool.workers[chosen].outputChan
 
 			if !open {
 				return nil, errors.New("Worker was closed before reaching a result")
@@ -193,11 +196,11 @@ func (pool *WorkPool) Open() (*WorkPool, error) {
 		pool.selects = make( []reflect.SelectCase, len(pool.workers) )
 
 		for i, workerWrapper := range pool.workers {
-			(*workerWrapper).Open()
+			workerWrapper.Open()
 
 			pool.selects[i] = reflect.SelectCase {
 				Dir: reflect.SelectRecv,
-				Chan: reflect.ValueOf((*workerWrapper).readyChan),
+				Chan: reflect.ValueOf(workerWrapper.readyChan),
 			}
 		}
 

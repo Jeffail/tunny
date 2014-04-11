@@ -161,41 +161,28 @@ func (worker *customWorker) Job(data interface{}) interface{} {
 func TestCustomWorkers (t *testing.T) {
 	outChan  := make(chan int, 10)
 
+	wg := new(sync.WaitGroup)
+	wg.Add(10)
+
 	workers := make([]tunny.TunnyWorker, 4)
 	for i, _ := range workers {
 		workers[i] = &(customWorker{})
 	}
 
-	pool, errPool := tunny.CreateCustomPool(workers).Open()
-
-	if errPool != nil {
-		t.Errorf("Error starting pool: ", errPool)
-		return
-	}
+	pool, _ := tunny.CreateCustomPool(workers).Open()
 
 	defer pool.Close()
 
 	for i := 0; i < 10; i++ {
 		go func() {
-			if value, err := pool.SendWork("hello world"); err != nil {
+			value, _ := pool.SendWork("hello world")
+			fmt.Println(value.(string))
 
-				t.Errorf("Error returned: ", err)
-
-			} else {
-
-				str, _ := value.(string)
-				if "custom job done: hello world" != str {
-					t.Errorf("Unexpected output from custom worker")
-				}
-
-			}
-			outChan <- 1
+			wg.Done()
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
-		<-outChan
-	}
+	wg.Wait()
 }
 
 ...
@@ -226,6 +213,29 @@ func (worker *customWorker) Initialize() {
  */
 func (worker *customWorker) Terminate() {
 	// Undo stuff
+}
+
+...
+```
+
+##Can a worker detect when a timeout occurs during a job?
+
+Yes, you can optionally implement the following method on your worker:
+
+```go
+...
+
+func (worker *interuptableWorker) TunnyInterupt() {
+
+	/* This is called from a separate goroutine, so only use thread safe
+	 * methods to communicate to your worker.
+
+	 * Something like this can be used to indicate midway through a job
+	 * that it should be abandoned, in your Job call you can simply
+	 * return nil.
+	 */
+	worker.stopChan<-1
+
 }
 
 ...

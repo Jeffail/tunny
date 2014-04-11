@@ -83,6 +83,8 @@ func (wrapper *workerWrapper) Open() {
 // Follow this with Join(), otherwise terminate isn't called on the worker
 func (wrapper *workerWrapper) Close() {
 	close(wrapper.jobChan)
+
+	// Breaks the worker out of a Ready() -> false loop
 	atomic.SwapUint32(&wrapper.poolOpen, uint32(0))
 }
 
@@ -95,5 +97,11 @@ func (wrapper *workerWrapper) Join() {
 
 	if extWorker, ok := wrapper.worker.(TunnyExtendedWorker); ok {
 		extWorker.Terminate()
+	}
+}
+
+func (wrapper *workerWrapper) Interupt() {
+	if extWorker, ok := wrapper.worker.(TunnyInteruptable); ok {
+		extWorker.TunnyInterupt()
 	}
 }

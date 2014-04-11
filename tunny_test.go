@@ -42,7 +42,7 @@ func TestTimeout(t *testing.T) {
 	routines := runtime.NumGoroutine()
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		return nil
 	}).Open()
 
@@ -54,11 +54,11 @@ func TestTimeout(t *testing.T) {
 	before := time.Now()
 
 	go func() {
-		if _, err := pool.SendWorkTimed(200, nil); err == nil {
+		if _, err := pool.SendWorkTimed(20, nil); err == nil {
 			t.Errorf("No timeout triggered thread one")
 		} else {
 			taken := ( time.Since(before) / time.Millisecond )
-			if taken > 210 {
+			if taken > 21 {
 				t.Errorf("Time taken at thread one: ", taken, ", with error: ", err)
 			}
 		}
@@ -74,11 +74,11 @@ func TestTimeout(t *testing.T) {
 	}()
 
 	go func() {
-		if _, err := pool.SendWorkTimed(200, nil); err == nil {
+		if _, err := pool.SendWorkTimed(20, nil); err == nil {
 			t.Errorf("No timeout triggered thread two")
 		} else {
 			taken := ( time.Since(before) / time.Millisecond )
-			if taken > 210 {
+			if taken > 21 {
 				t.Errorf("Time taken at thread two: ", taken, ", with error: ", err)
 			}
 		}
@@ -141,7 +141,7 @@ func validateReturnInt(t *testing.T, expecting int, object interface{}) {
 }
 
 func TestBasic(t *testing.T) {
-	sizePool, repeats, sleepFor, margin := 16, 2, 250, 100
+	sizePool, repeats, sleepFor, margin := 16, 2, 50, 5
 	outChan  := make(chan int, sizePool)
 	routines := runtime.NumGoroutine()
 
@@ -516,6 +516,53 @@ func TestAsyncCalls(t *testing.T) {
 
 	for i := 0; i < numData; i++ {
 		<-outChan
+	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
+}
+
+type interuptableWorker struct {
+	stopChan chan int
+}
+
+func (worker *interuptableWorker) Job(data interface{}) interface{} {
+	select {
+	case <-time.After(100 * time.Millisecond):
+		return 25
+	case <- worker.stopChan:
+		return 50
+	}
+	return 25
+}
+
+func (worker *interuptableWorker) Ready() bool {
+	return true
+}
+
+func (worker *interuptableWorker) TunnyInterupt() {
+	worker.stopChan<-1
+}
+
+func Test(t *testing.T) {
+	routines := runtime.NumGoroutine()
+
+	workers := make([]TunnyWorker, 1)
+	workers[0] = &interuptableWorker{ make(chan int, 1) }
+
+	pool, poolErr := CreateCustomPool(workers).Open()
+
+	if poolErr != nil {
+		t.Errorf("Error starting pool: ", poolErr)
+		return
+	}
+
+	res, err := pool.SendWorkTimed(25, 50)
+	if err == nil || res == 25 {
+		t.Errorf("Interupt not activated!")
 	}
 
 	pool.Close()
