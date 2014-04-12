@@ -300,6 +300,6 @@ Tunny has support for specified timeouts at the work request level, if this time
 
 ###- Backlogged jobs are FIFO, for now
 
-When a job arrives and all workers are occupied the waiting thread will lock at a select block whilst waiting to be assigned a worker. In practice this seems to create a FIFO queue, implying that this is how the implementation of golang has dealt with select blocks, channels are multiple reading goroutines.
+When a job arrives and all workers are occupied the waiting thread will lock at a select block whilst waiting to be assigned a worker. In practice this seems to create a FIFO queue, implying that this is how the implementation of golang has dealt with select blocks, channels and multiple reading goroutines.
 
 However, I haven't found a guarantee of this behaviour in the golang documentation, so I cannot guarantee that this will always be the case.
