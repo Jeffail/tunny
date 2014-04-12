@@ -71,9 +71,9 @@ func (wrapper *workerWrapper) Open() {
 		extWorker.TunnyInitialize()
 	}
 
-	wrapper.readyChan  = make (chan int)
-	wrapper.jobChan    = make (chan interface{})
-	wrapper.outputChan = make (chan interface{})
+	wrapper.readyChan  = make(chan int)
+	wrapper.jobChan    = make(chan interface{})
+	wrapper.outputChan = make(chan interface{})
 
 	atomic.SwapUint32(&wrapper.poolOpen, uint32(1))
 

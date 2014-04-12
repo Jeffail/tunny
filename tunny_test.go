@@ -573,6 +573,53 @@ func Test(t *testing.T) {
 }
 
 /*
+Tests whether a backlog of jobs will be performed in FIFO order.
+*/
+func TestQueueing(t *testing.T) {
+	routines := runtime.NumGoroutine()
+	numWorkers, numJobs := 1, 10
+
+	pool, poolErr := CreatePool(numWorkers, func(data interface{}) interface{} {
+		time.Sleep(50 * time.Millisecond)
+		return data
+	}).Open()
+
+	if poolErr != nil {
+		t.Errorf("Error starting pool: ", poolErr)
+		return
+	}
+
+	outChan := make(chan int)
+	inChan  := make(chan int)
+
+	for i := 0; i < numJobs; i++ {
+		go func() {
+			val := <-inChan
+			result, _ := pool.SendWork(val)
+			outChan<-result.(int)
+		}()
+	}
+
+	for i := 0; i < numJobs; i++ {
+		inChan<-i
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	for i := 0; i < numJobs; i++ {
+		val := <-outChan
+		if val != i {
+			t.Errorf("Wrong value, expected %v, got %v", i, val)
+		}
+	}
+
+	pool.Close()
+
+	if routines != runtime.NumGoroutine() {
+		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
+	}
+}
+
+/*
 
 Test template
 

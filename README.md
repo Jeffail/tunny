@@ -2,9 +2,9 @@
 
 Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and stuff.
 
-Use cases for tunny are any situation where a large and possibly constant flood of jobs are imminent but indeterminate and you need to bottleneck those jobs through a fixed number of dedicated worker goroutines. The most obvious example is as an easy wrapper for limiting the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
+Use cases for tunny are any situation where a large and constant flood of jobs are imminent at an indeterminate rate and you need to bottleneck those jobs through a fixed number of dedicated worker goroutines. A common use case is to limit the hard work done in your software to the number of CPU's available, preventing threads from foolishly competing with each other for CPU time.
 
-Tunny helps the most when either the input jobs arrive at an inconsistent rate (from http clients, for example) or the jobs themselves vary greatly in processing time (like language detection or sentiment analysis).
+Tunny works internally by allowing workers to pick up jobs ad-hoc rather than assigning each their own queue. There are many advantages to this method but it helps the most when the jobs vary greatly in processing time (like language detection or sentiment analysis).
 
 ##How to install:
 
@@ -298,8 +298,8 @@ This means an individual worker is able to halt, or spend exceptional lengths of
 
 Tunny has support for specified timeouts at the work request level, if this timeout is triggered whilst waiting for a worker to become available then the request is dropped entirely and no effort is wasted on the abandoned request.
 
-###- A job request is unprioritized
+###- Backlogged jobs are FIFO, for now
 
-The incoming requests are not prioritized in any way, if the current work load is beyond the capacity of the pool then the remaining jobs are selected at random. This is intentional because a pool with an increasing backlog and an orderly queue of jobs would favour requests that are closest to reaching a potential timeout. If all jobs are assumed to be of equal priority then the system suffers when favour is granted to the jobs most likely to be discarded before completion.
+When a job arrives and all workers are occupied the waiting thread will lock at a select block whilst waiting to be assigned a worker. In practice this seems to create a FIFO queue, implying that this is how the implementation of golang has dealt with select blocks, channels are multiple reading goroutines.
 
-The plan is to have this behaviour configurable, and interchangeble with an orderly queue.
+However, I haven't found a guarantee of this behaviour in the golang documentation, so I cannot guarantee that this will always be the case.

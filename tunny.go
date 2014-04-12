@@ -24,6 +24,7 @@ THE SOFTWARE.
 package tunny
 
 import (
+	"sync/atomic"
 	"reflect"
 	"errors"
 	"time"
@@ -87,27 +88,144 @@ func (worker *tunnyDefaultWorker) Ready() bool {
 }
 
 /*
-WorkPool contains the structures and methods required to communicate with your pool, it must
+workPool contains the structures and methods required to communicate with your pool, it must
 be opened before sending work and closed when all jobs are completed.
 
 You may open and close a pool as many times as you wish, calling close is a blocking call that
 guarantees all goroutines are stopped.
 */
-type WorkPool struct {
-	workers []*workerWrapper
-	selects []reflect.SelectCase
-	mutex   sync.RWMutex
-	running bool
+type workPool struct {
+	workers     []*workerWrapper
+	selects     []reflect.SelectCase
+	statusMutex sync.RWMutex
+	running     uint32
+}
+
+func (pool *workPool) isRunning() bool {
+	return ( atomic.LoadUint32(&pool.running) == 1 )
+}
+
+func (pool *workPool) setRunning(running bool) {
+	if running {
+		atomic.SwapUint32(&pool.running, 1)
+	} else {
+		atomic.SwapUint32(&pool.running, 0)
+	}
+}
+
+/*
+Open all channels and launch the background goroutines managed by the pool.
+*/
+func (pool *workPool) Open() (*workPool, error) {
+	pool.statusMutex.Lock()
+	defer pool.statusMutex.Unlock()
+
+	if !pool.isRunning() {
+
+		pool.selects = make( []reflect.SelectCase, len(pool.workers) )
+
+		for i, workerWrapper := range pool.workers {
+			workerWrapper.Open()
+
+			pool.selects[i] = reflect.SelectCase {
+				Dir: reflect.SelectRecv,
+				Chan: reflect.ValueOf(workerWrapper.readyChan),
+			}
+		}
+
+		pool.setRunning(true)
+		return pool, nil
+
+	} else {
+		return nil, errors.New("Pool is already running!")
+	}
+}
+
+/*
+Close all channels and goroutines managed by the pool.
+*/
+func (pool *workPool) Close() error {
+	pool.statusMutex.Lock()
+	defer pool.statusMutex.Unlock()
+
+	if pool.isRunning() {
+
+		for _, workerWrapper := range pool.workers {
+			workerWrapper.Close()
+		}
+
+		for _, workerWrapper := range pool.workers {
+			workerWrapper.Join()
+		}
+
+		pool.setRunning(false)
+		return nil
+
+	} else {
+		return errors.New("Cannot close when the pool is not running!")
+	}
+}
+
+/*
+Creates a pool of workers, and takes a closure argument which is the action to perform
+for each job.
+*/
+func CreatePool(numWorkers int, job func(interface{}) interface{}) *workPool {
+	pool := workPool { running: 0 }
+
+	pool.workers = make ([]*workerWrapper, numWorkers)
+	for i, _ := range pool.workers {
+		newWorker := workerWrapper {
+			worker: &(tunnyDefaultWorker { &job }),
+		}
+		pool.workers[i] = &newWorker
+	}
+
+	return &pool
+}
+
+/*
+Creates a pool of generic workers. When sending work to a pool of generic workers you
+send a closure (func()) which is the job to perform.
+*/
+func CreatePoolGeneric(numWorkers int) *workPool {
+
+	return CreatePool(numWorkers, func (jobCall interface{}) interface{} {
+		if method, ok := jobCall.(func()); ok {
+			method()
+			return nil
+		}
+		return errors.New("Generic worker not given a func()")
+	})
+
+}
+
+/*
+Creates a pool for an array of custom workers. The custom workers must implement TunnyWorker,
+and may also optionally implement TunnyExtendedWorker and TunnyInteruptable.
+*/
+func CreateCustomPool(customWorkers []TunnyWorker) *workPool {
+	pool := workPool { running: 0 }
+
+	pool.workers = make ([]*workerWrapper, len(customWorkers))
+	for i, _ := range pool.workers {
+		newWorker := workerWrapper {
+			worker: customWorkers[i],
+		}
+		pool.workers[i] = &newWorker
+	}
+
+	return &pool
 }
 
 /*
 Send a job to a worker and return the result, this is a synchronous call with a timeout.
 */
-func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
-	pool.mutex.RLock()
-	defer pool.mutex.RUnlock()
+func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
+	pool.statusMutex.RLock()
+	defer pool.statusMutex.RUnlock()
 
-	if pool.running {
+	if pool.isRunning() {
 		before := time.Now()
 
 		// Create new selectcase[] and add time out case
@@ -118,6 +236,7 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 
 		// Wait for workers, or time out
 		if chosen, _, ok := reflect.Select(selectCases); ok {
+
 			if chosen < ( len(selectCases) - 1 ) {
 				pool.workers[chosen].jobChan <- jobData
 
@@ -154,7 +273,7 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 Send a timed job to a worker without blocking, and optionally send the result to a
 receiving closure. You may set the closure to nil if no further actions are required.
 */
-func (pool *WorkPool) SendWorkTimedAsync(
+func (pool *workPool) SendWorkTimedAsync(
 	milliTimeout time.Duration,
 	jobData interface{},
 	after func(interface{}, error),
@@ -170,12 +289,11 @@ func (pool *WorkPool) SendWorkTimedAsync(
 /*
 Send a job to a worker and return the result, this is a synchronous call.
 */
-func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
-	pool.mutex.RLock()
-	defer pool.mutex.RUnlock()
+func (pool *workPool) SendWork(jobData interface{}) (interface{}, error) {
+	pool.statusMutex.RLock()
+	defer pool.statusMutex.RUnlock()
 
-	if pool.running {
-
+	if pool.isRunning() {
 		if chosen, _, ok := reflect.Select(pool.selects); ok && chosen >= 0 {
 			pool.workers[chosen].jobChan <- jobData
 			result, open := <-pool.workers[chosen].outputChan
@@ -197,116 +315,11 @@ func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 Send a job to a worker without blocking, and optionally send the result to a receiving
 closure. You may set the closure to nil if no further actions are required.
 */
-func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
+func (pool *workPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
 	go func() {
 		result, err := pool.SendWork(jobData)
 		if after != nil {
 			after(result, err)
 		}
 	}()
-}
-
-/*
-Open all channels and launch the background goroutines managed by the pool.
-*/
-func (pool *WorkPool) Open() (*WorkPool, error) {
-	pool.mutex.Lock()
-	defer pool.mutex.Unlock()
-
-	if !pool.running {
-
-		pool.selects = make( []reflect.SelectCase, len(pool.workers) )
-
-		for i, workerWrapper := range pool.workers {
-			workerWrapper.Open()
-
-			pool.selects[i] = reflect.SelectCase {
-				Dir: reflect.SelectRecv,
-				Chan: reflect.ValueOf(workerWrapper.readyChan),
-			}
-		}
-
-		pool.running = true
-		return pool, nil
-
-	} else {
-		return nil, errors.New("Pool is already running!")
-	}
-}
-
-/*
-Close all channels and goroutines managed by the pool.
-*/
-func (pool *WorkPool) Close() error {
-	pool.mutex.Lock()
-	defer pool.mutex.Unlock()
-
-	if pool.running {
-
-		for _, workerWrapper := range pool.workers {
-			workerWrapper.Close()
-		}
-
-		for _, workerWrapper := range pool.workers {
-			workerWrapper.Join()
-		}
-
-		pool.running = false
-		return nil
-
-	} else {
-		return errors.New("Cannot close when the pool is not running!")
-	}
-}
-
-/*
-Creates a pool of workers, and takes a closure argument which is the action to perform
-for each job.
-*/
-func CreatePool(numWorkers int, job func(interface{}) interface{}) *WorkPool {
-	pool := WorkPool { running: false }
-
-	pool.workers = make ([]*workerWrapper, numWorkers)
-	for i, _ := range pool.workers {
-		newWorker := workerWrapper {
-			worker: &(tunnyDefaultWorker { &job }),
-		}
-		pool.workers[i] = &newWorker
-	}
-
-	return &pool
-}
-
-/*
-Creates a pool of generic workers. When sending work to a pool of generic workers you
-send a closure (func()) which is the job to perform.
-*/
-func CreatePoolGeneric(numWorkers int) *WorkPool {
-
-	return CreatePool(numWorkers, func (jobCall interface{}) interface{} {
-		if method, ok := jobCall.(func()); ok {
-			method()
-			return nil
-		}
-		return errors.New("Generic worker not given a func()")
-	})
-
-}
-
-/*
-Creates a pool for an array of custom workers. The custom workers must implement TunnyWorker,
-and may also optionally implement TunnyExtendedWorker and TunnyInteruptable.
-*/
-func CreateCustomPool(customWorkers []TunnyWorker) *WorkPool {
-	pool := WorkPool { running: false }
-
-	pool.workers = make ([]*workerWrapper, len(customWorkers))
-	for i, _ := range pool.workers {
-		newWorker := workerWrapper {
-			worker: customWorkers[i],
-		}
-		pool.workers[i] = &newWorker
-	}
-
-	return &pool
 }
