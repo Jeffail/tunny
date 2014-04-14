@@ -62,7 +62,7 @@ func CalcRoots (inputs []float64) []float64 {
 
 			wg.Done()
 
-		}(i + 10)
+		}(i)
 	}
 
 	// Wait for all jobs to be completed before closing the pool
@@ -75,6 +75,39 @@ func CalcRoots (inputs []float64) []float64 {
 ```
 
 This particular example, since it all resides in the one func, could actually be done with less code by simply spawning numCPU's goroutines that gobble up a shared channel of float64's. This would probably also be quicker since you waste cycles here boxing and unboxing the job values, but the example serves well as a demonstration of the API.
+
+##So where do I actually benefit from using tunny?
+
+Imagine a situation where at the front end you have a source of jobs that arrive at a non-constant and unpredictable rate, and for each job the back end must perform a large calculation of varying difficulty and respond with the result. You want to connect the front end with the back in a way that doesn't flood your machine with competing work threads, and also where each job can be received and responded to synchronously in a simple way.
+
+These situations are where Tunny will help the most. To illustrate, let's imagine that func ServeThisClient(client NetworkClient, request NetworkRequest) is an asynchronous call instigated by your network handler to serve each individual network request.
+
+```go
+...
+
+var pool, _ = tunny.CreatePool(runtime.NumCPU(), func(object interface{}) interface{} {
+
+	return ThisCallDoesTonsOfHardWork(object)
+
+}).Open()
+
+// Each call will be from a fresh goroutine
+func ServeThisClient(client NetworkClient, request NetworkRequest) {
+
+	// Time out after 500ms, this is explained with further examples below
+	result, err := pool.SendWorkTimed(500, request.Body)
+	if err == nil {
+		client.SendResponse(result)
+	} else {
+		client.SendErrorResponse(err)
+	}
+
+}
+
+...
+```
+
+Not only will this example ensure that the hard work is only done across as many goroutines as you have CPU cores, but because a time out is specified then the process is guaranteed not to hang and explode with infinite waiting requests when the number of requests surpasses the resources available, as long as your server can handle 500ms worth of requests in memory.
 
 ##Can I send a closure instead of data?
 
@@ -218,7 +251,7 @@ func (worker *customWorker) TunnyTerminate() {
 ...
 ```
 
-##Can a worker detect when a timeout occurs during a job?
+##Can a worker detect when a timeout occurs?
 
 Yes, you can optionally implement the following method on your worker:
 
@@ -228,7 +261,7 @@ Yes, you can optionally implement the following method on your worker:
 func (worker *interuptableWorker) TunnyInterupt() {
 
 	/* This is called from a separate goroutine, so only use thread safe
-	 * methods to communicate to your worker.
+	 * methods to communicate with your worker.
 
 	 * Something like this can be used to indicate midway through a job
 	 * that it should be abandoned, in your Job call you can simply
@@ -240,6 +273,10 @@ func (worker *interuptableWorker) TunnyInterupt() {
 
 ...
 ```
+
+This method will be called in the event that a timeout occurs whilst waiting for the result. TunnyInterupt is called from a newly spawned goroutine, whose job is to call TunnyInterupt and then follow it by receiving the eventual output from the worker thread.
+
+You can therefore know for certain that throughout the call the worker thread will not have received the next job. Infact, you can verify this yourself by ensuring that Ready() is not called before this method exits.
 
 ##Can SendWork be called asynchronously?
 
@@ -260,7 +297,7 @@ for i := 0; i < 100; i++ {
 	pool.SendWorkAsync(func() {
 
 		// Work here
-		outputChan <- doHardJobOrWhatever()
+		outputChan <-doHardJobOrWhatever()
 
 	}, nil) // nil here because the result is returned in the closure
 }
@@ -275,16 +312,37 @@ pool.SendWorkAsync(func() {
 	/* Called when the work is done, this is executed in a new goroutine.
 	 * Use this call to forward the result onwards without blocking the worker.
 	 */
-	DoThatOtherThing()
+	DoThatOtherThing(result, err)
 
 })
 
 ...
 ```
 
-##So where do I actually benefit from using tunny?
+And another, because why not?
 
-You don't, I'm not a god damn charity.
+```go
+...
+
+outputChan := make(chan string)
+
+pool, _ := tunny.CreatePool(4, func(data interface{}) interface{} {
+
+	outputChan <-doHardJobOrWhatever(data)
+	return nil // Not bothered about synchronous output
+
+}).Open();
+
+for i := 0; i < 100; i++ {
+	pool.SendWorkAsync(inputs[i], nil)
+}
+
+pool.SendWorkAsync("one last job", nil)
+
+// Do other stuff here
+
+...
+```
 
 ##Behaviours and caveats:
 
