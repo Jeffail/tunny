@@ -40,7 +40,7 @@ func (wrapper *workerWrapper) Loop() {
 	// TODO: Configure?
 	tout := time.Duration(5)
 
-	for !wrapper.worker.Ready() {
+	for !wrapper.worker.TunnyReady() {
 		// It's sad that we can't simply check if jobChan is closed here.
 		if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
 			break
@@ -51,8 +51,8 @@ func (wrapper *workerWrapper) Loop() {
 	wrapper.readyChan <- 1
 
 	for data := range wrapper.jobChan {
-		wrapper.outputChan <- wrapper.worker.Job( data )
-		for !wrapper.worker.Ready() {
+		wrapper.outputChan <- wrapper.worker.TunnyJob( data )
+		for !wrapper.worker.TunnyReady() {
 			if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
 				break
 			}
@@ -89,8 +89,11 @@ func (wrapper *workerWrapper) Close() {
 }
 
 func (wrapper *workerWrapper) Join() {
+	// Ensure that both the ready and output channels are closed
 	for {
-		if _, ok := <-wrapper.readyChan; !ok {
+		_, readyOpen  := <-wrapper.readyChan
+		_, outputOpen := <-wrapper.outputChan
+		if !readyOpen && !outputOpen {
 			break;
 		}
 	}

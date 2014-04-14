@@ -174,12 +174,12 @@ type customWorker struct {
 }
 
 // Use this call to block further jobs if necessary
-func (worker *customWorker) Ready() bool {
+func (worker *customWorker) TunnyReady() bool {
 	return true
 }
 
 // This is where the work actually happens
-func (worker *customWorker) Job(data interface{}) interface{} {
+func (worker *customWorker) TunnyJob(data interface{}) interface{} {
 	/* TODO: Use and modify state
 	 * there's no need for thread safety paradigms here unless the
 	 * data is being accessed from another goroutine outside of
@@ -221,11 +221,11 @@ func TestCustomWorkers (t *testing.T) {
 ...
 ```
 
-You'll notice that as well as the important Job(data interface{}) interface{} call to implement there is also the call Ready() bool. Ready is potentially an important part of the TunnyWorker that allows you to use your state to determine whether or not this worker should take on another job, and answer true or false accordingly.
+You'll notice that as well as the important TunnyJob(data interface{}) interface{} call to implement there is also the call TunnyReady() bool. TunnyReady is potentially an important part of the TunnyWorker that allows you to use your state to determine whether or not this worker should take on another job, and answer true or false accordingly.
 
-For example, your worker could hold a counter of how many jobs it has done, and perhaps after a certain amount it should perform another act before taking on more work, it's important to use Ready for these occasions since blocking the Job call will hold up the waiting client.
+For example, your worker could hold a counter of how many jobs it has done, and perhaps after a certain amount it should perform another act before taking on more work, it's important to use TunnyReady for these occasions since blocking the TunnyJob call will hold up the waiting client.
 
-It is recommended that you do not block Ready() whilst you wait for some condition to change, since this can prevent the pool from closing the worker goroutines. Currently, Ready is called at 5 millisecond intervals until you answer true or the pool is closed.
+It is recommended that you do not block TunnyReady() whilst you wait for some condition to change, since this can prevent the pool from closing the worker goroutines. Currently, TunnyReady is called at 5 millisecond intervals until you answer true or the pool is closed.
 
 ##I need more control
 
@@ -264,7 +264,7 @@ func (worker *interuptableWorker) TunnyInterupt() {
 	 * methods to communicate with your worker.
 
 	 * Something like this can be used to indicate midway through a job
-	 * that it should be abandoned, in your Job call you can simply
+	 * that it should be abandoned, in your TunnyJob call you can simply
 	 * return nil.
 	 */
 	worker.stopChan<-1
@@ -276,7 +276,7 @@ func (worker *interuptableWorker) TunnyInterupt() {
 
 This method will be called in the event that a timeout occurs whilst waiting for the result. TunnyInterupt is called from a newly spawned goroutine, whose job is to call TunnyInterupt and then follow it by receiving the eventual output from the worker thread.
 
-You can therefore know for certain that throughout the call the worker thread will not have received the next job. Infact, you can verify this yourself by ensuring that Ready() is not called before this method exits.
+You can therefore know for certain that throughout the call the worker thread will not have received the next job. Infact, you can verify this yourself by ensuring that TunnyReady() is not called before this method exits.
 
 ##Can SendWork be called asynchronously?
 

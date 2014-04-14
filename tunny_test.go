@@ -28,18 +28,8 @@ import (
 	"runtime"
 )
 
-/* time.Sleep seems to be spawning a goroutine that doesn't stop. This is fine and stuff
- * but tunny tests do a comparisson of runtime.NumGoroutine before and after to make sure
- * that goroutines aren't being left open after .Close(), so this test simply opens that
- * goroutine beforehand.
- */
-func TestTestTestyTestAllTheTestsNeedTesting(t * testing.T) {
-	time.Sleep(time.Millisecond)
-}
-
 func TestTimeout(t *testing.T) {
 	outChan  := make(chan int, 3)
-	routines := runtime.NumGoroutine()
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(100 * time.Millisecond)
@@ -90,16 +80,11 @@ func TestTimeout(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 func TestTimeoutRequests(t *testing.T) {
 	n_polls  := 200
 	outChan  := make(chan int, n_polls)
-	routines := runtime.NumGoroutine()
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(time.Millisecond)
@@ -124,10 +109,6 @@ func TestTimeoutRequests(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 func validateReturnInt(t *testing.T, expecting int, object interface{}) {
@@ -143,7 +124,6 @@ func validateReturnInt(t *testing.T, expecting int, object interface{}) {
 func TestBasic(t *testing.T) {
 	sizePool, repeats, sleepFor, margin := 16, 2, 50, 5
 	outChan  := make(chan int, sizePool)
-	routines := runtime.NumGoroutine()
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -185,14 +165,9 @@ func TestBasic(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 func TestGeneric(t *testing.T) {
-	routines := runtime.NumGoroutine()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	if pool, err := CreatePoolGeneric(10).Open(); err == nil {
@@ -234,15 +209,10 @@ func TestGeneric(t *testing.T) {
 		t.Errorf("Error starting pool: ", err)
 		return
 	}
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 func TestExampleCase(t *testing.T) {
 	outChan  := make(chan int, 10)
-	routines := runtime.NumGoroutine()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	pool, errPool := CreatePool(4, func(object interface{}) interface{} {
@@ -276,21 +246,17 @@ func TestExampleCase(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 type customWorker struct {
 	jobsCompleted int
 }
 
-func (worker *customWorker) Ready() bool {
+func (worker *customWorker) TunnyReady() bool {
 	return true
 }
 
-func (worker *customWorker) Job(data interface{}) interface{} {
+func (worker *customWorker) TunnyJob(data interface{}) interface{} {
 	/* There's no need for thread safety paradigms here unless the data is being accessed from
 	 * another goroutine outside of the pool.
 	 */
@@ -303,7 +269,6 @@ func (worker *customWorker) Job(data interface{}) interface{} {
 
 func TestCustomWorkers(t *testing.T) {
 	outChan  := make(chan int, 10)
-	routines := runtime.NumGoroutine()
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -360,10 +325,6 @@ func TestCustomWorkers(t *testing.T) {
 	if totalJobs != 10 {
 		t.Errorf("Total jobs expected: %v, actual: %v", 10, totalJobs)
 	}
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 type customExtendedWorker struct {
@@ -371,7 +332,7 @@ type customExtendedWorker struct {
 	asleep        bool
 }
 
-func (worker *customExtendedWorker) Job(data interface{}) interface{} {
+func (worker *customExtendedWorker) TunnyJob(data interface{}) interface{} {
 	if outputStr, ok := data.(string); ok {
 		(*worker).jobsCompleted++;
 		return ("custom job done: " + outputStr)
@@ -380,7 +341,7 @@ func (worker *customExtendedWorker) Job(data interface{}) interface{} {
 }
 
 // Do 10 jobs and then stop.
-func (worker *customExtendedWorker) Ready() bool {
+func (worker *customExtendedWorker) TunnyReady() bool {
 	return !(*worker).asleep && ((*worker).jobsCompleted < 10)
 }
 
@@ -394,7 +355,6 @@ func (worker *customExtendedWorker) TunnyTerminate() {
 
 func TestCustomExtendedWorkers(t *testing.T) {
 	outChan  := make(chan int, 10)
-	routines := runtime.NumGoroutine()
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	extWorkers   := make([]*customExtendedWorker, 4)
@@ -463,15 +423,9 @@ func TestCustomExtendedWorkers(t *testing.T) {
 			}
 		}
 	}
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 func TestAsyncCalls(t *testing.T) {
-	routines := runtime.NumGoroutine()
-
 	numWorkers, numData := 4, 400
 	outChan := make(chan int, numData)
 
@@ -519,17 +473,13 @@ func TestAsyncCalls(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 type interuptableWorker struct {
 	stopChan chan int
 }
 
-func (worker *interuptableWorker) Job(data interface{}) interface{} {
+func (worker *interuptableWorker) TunnyJob(data interface{}) interface{} {
 	select {
 	case <-time.After(100 * time.Millisecond):
 		return 25
@@ -539,7 +489,7 @@ func (worker *interuptableWorker) Job(data interface{}) interface{} {
 	return 25
 }
 
-func (worker *interuptableWorker) Ready() bool {
+func (worker *interuptableWorker) TunnyReady() bool {
 	return true
 }
 
@@ -548,8 +498,6 @@ func (worker *interuptableWorker) TunnyInterupt() {
 }
 
 func Test(t *testing.T) {
-	routines := runtime.NumGoroutine()
-
 	workers := make([]TunnyWorker, 1)
 	workers[0] = &interuptableWorker{ make(chan int, 1) }
 
@@ -566,17 +514,12 @@ func Test(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 /*
 Tests whether a backlog of jobs will be performed in FIFO order.
 */
 func TestQueueing(t *testing.T) {
-	routines := runtime.NumGoroutine()
 	numWorkers, numJobs := 1, 10
 
 	pool, poolErr := CreatePool(numWorkers, func(data interface{}) interface{} {
@@ -613,10 +556,6 @@ func TestQueueing(t *testing.T) {
 	}
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 
 /*
@@ -624,8 +563,6 @@ func TestQueueing(t *testing.T) {
 Test template
 
 func Test(t *testing.T) {
-	routines := runtime.NumGoroutine()
-
 	pool, poolErr := CreatePool(numWorkers, func(data interface{}) interface{} {
 	}).Open()
 
@@ -637,9 +574,5 @@ func Test(t *testing.T) {
 	// TEST HERE
 
 	pool.Close()
-
-	if routines != runtime.NumGoroutine() {
-		t.Errorf("Excess goroutines: %v", runtime.NumGoroutine() - routines)
-	}
 }
 */

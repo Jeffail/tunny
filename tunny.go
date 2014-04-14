@@ -37,13 +37,13 @@ The basic interface of a tunny worker.
 type TunnyWorker interface {
 
 	// Called for each job, expects the result to be returned synchronously
-	Job(interface{}) (interface{})
+	TunnyJob(interface{}) (interface{})
 
 	// Called after each job, this indicates whether the worker is ready for the next job.
 	// The default implementation is to return true always. If false is returned then the
 	// method is called every five milliseconds until either true is returned or the pool
 	// is closed.
-	Ready() bool
+	TunnyReady() bool
 
 }
 
@@ -79,11 +79,11 @@ type tunnyDefaultWorker struct {
 	job *func(interface{}) (interface{})
 }
 
-func (worker *tunnyDefaultWorker) Job(data interface{}) interface{} {
+func (worker *tunnyDefaultWorker) TunnyJob(data interface{}) interface{} {
 	return (*worker.job)(data)
 }
 
-func (worker *tunnyDefaultWorker) Ready() bool {
+func (worker *tunnyDefaultWorker) TunnyReady() bool {
 	return true
 }
 
