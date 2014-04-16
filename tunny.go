@@ -32,7 +32,7 @@ import (
 )
 
 /*
-The basic interface of a tunny worker.
+TunnyWorker - The basic interface of a tunny worker.
 */
 type TunnyWorker interface {
 
@@ -48,7 +48,8 @@ type TunnyWorker interface {
 }
 
 /*
-An optional interface that can be implemented if the worker needs more control over its state.
+TunnyExtendedWorker - An optional interface that can be implemented if the worker needs
+more control over its state.
 */
 type TunnyExtendedWorker interface {
 
@@ -61,8 +62,8 @@ type TunnyExtendedWorker interface {
 }
 
 /*
-An optional interface that can be implemented in order to allow the worker to drop jobs when
-they are abandoned.
+TunnyInteruptable - An optional interface that can be implemented in order to allow the
+worker to drop jobs when they are abandoned.
 */
 type TunnyInteruptable interface {
 
@@ -136,9 +137,8 @@ func (pool *workPool) Open() (*workPool, error) {
 		pool.setRunning(true)
 		return pool, nil
 
-	} else {
-		return nil, errors.New("Pool is already running!")
 	}
+	return nil, errors.New("pool is already running")
 }
 
 /*
@@ -161,20 +161,19 @@ func (pool *workPool) Close() error {
 		pool.setRunning(false)
 		return nil
 
-	} else {
-		return errors.New("Cannot close when the pool is not running!")
 	}
+	return errors.New("cannot close when the pool is not running")
 }
 
 /*
-Creates a pool of workers, and takes a closure argument which is the action to perform
-for each job.
+CreatePool - Creates a pool of workers, and takes a closure argument which is the action
+to perform for each job.
 */
 func CreatePool(numWorkers int, job func(interface{}) interface{}) *workPool {
 	pool := workPool { running: 0 }
 
 	pool.workers = make ([]*workerWrapper, numWorkers)
-	for i, _ := range pool.workers {
+	for i := range pool.workers {
 		newWorker := workerWrapper {
 			worker: &(tunnyDefaultWorker { &job }),
 		}
@@ -185,8 +184,8 @@ func CreatePool(numWorkers int, job func(interface{}) interface{}) *workPool {
 }
 
 /*
-Creates a pool of generic workers. When sending work to a pool of generic workers you
-send a closure (func()) which is the job to perform.
+CreatePoolGeneric - Creates a pool of generic workers. When sending work to a pool of
+generic workers you send a closure (func()) which is the job to perform.
 */
 func CreatePoolGeneric(numWorkers int) *workPool {
 
@@ -195,20 +194,21 @@ func CreatePoolGeneric(numWorkers int) *workPool {
 			method()
 			return nil
 		}
-		return errors.New("Generic worker not given a func()")
+		return errors.New("generic worker not given a func()")
 	})
 
 }
 
 /*
-Creates a pool for an array of custom workers. The custom workers must implement TunnyWorker,
-and may also optionally implement TunnyExtendedWorker and TunnyInteruptable.
+CreateCustomPool - Creates a pool for an array of custom workers. The custom workers
+must implement TunnyWorker, and may also optionally implement TunnyExtendedWorker and
+TunnyInteruptable.
 */
 func CreateCustomPool(customWorkers []TunnyWorker) *workPool {
 	pool := workPool { running: 0 }
 
 	pool.workers = make ([]*workerWrapper, len(customWorkers))
-	for i, _ := range pool.workers {
+	for i := range pool.workers {
 		newWorker := workerWrapper {
 			worker: customWorkers[i],
 		}
@@ -219,7 +219,8 @@ func CreateCustomPool(customWorkers []TunnyWorker) *workPool {
 }
 
 /*
-Send a job to a worker and return the result, this is a synchronous call with a timeout.
+SendWorkTimed - Send a job to a worker and return the result, this is a synchronous
+call with a timeout.
 */
 func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
 	pool.statusMutex.RLock()
@@ -244,7 +245,7 @@ func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 				select {
 				case data, open := <-pool.workers[chosen].outputChan:
 					if !open {
-						return nil, errors.New("Worker was closed before reaching a result")
+						return nil, errors.New("worker was closed before reaching a result")
 					}
 					return data, nil
 				case <- time.After((milliTimeout * time.Millisecond) - time.Since(before)):
@@ -256,22 +257,23 @@ func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 						pool.workers[chosen].Interupt()
 						<-pool.workers[chosen].outputChan
 					}()
-					return nil, errors.New("Request timed out whilst waiting for job to complete")
+					return nil, errors.New("request timed out whilst waiting for job to complete")
 				}
 			} else {
-				return nil, errors.New("Request timed out whilst waiting for a worker")
+				return nil, errors.New("request timed out whilst waiting for a worker")
 			}
 		} else {
-			return nil, errors.New("Failed to find a worker")
+			return nil, errors.New("failed to find a worker")
 		}
 	} else {
-		return nil, errors.New("Pool is not running! Call Open() before sending work")
+		return nil, errors.New("pool is not running! Call Open() before sending work")
 	}
 }
 
 /*
-Send a timed job to a worker without blocking, and optionally send the result to a
-receiving closure. You may set the closure to nil if no further actions are required.
+SendWorkTimedAsync - Send a timed job to a worker without blocking, and optionally
+send the result to a receiving closure. You may set the closure to nil if no
+further actions are required.
 */
 func (pool *workPool) SendWorkTimedAsync(
 	milliTimeout time.Duration,
@@ -287,7 +289,7 @@ func (pool *workPool) SendWorkTimedAsync(
 }
 
 /*
-Send a job to a worker and return the result, this is a synchronous call.
+SendWork - Send a job to a worker and return the result, this is a synchronous call.
 */
 func (pool *workPool) SendWork(jobData interface{}) (interface{}, error) {
 	pool.statusMutex.RLock()
@@ -299,21 +301,19 @@ func (pool *workPool) SendWork(jobData interface{}) (interface{}, error) {
 			result, open := <-pool.workers[chosen].outputChan
 
 			if !open {
-				return nil, errors.New("Worker was closed before reaching a result")
+				return nil, errors.New("worker was closed before reaching a result")
 			}
 			return result, nil
 		}
-
-		return nil, errors.New("Failed to find or wait for a worker")
-
-	} else {
-		return nil, errors.New("Pool is not running! Call Open() before sending work")
+		return nil, errors.New("failed to find or wait for a worker")
 	}
+	return nil, errors.New("pool is not running! Call Open() before sending work")
 }
 
 /*
-Send a job to a worker without blocking, and optionally send the result to a receiving
-closure. You may set the closure to nil if no further actions are required.
+SendWorkAsync - Send a job to a worker without blocking, and optionally send the
+result to a receiving closure. You may set the closure to nil if no further actions
+are required.
 */
 func (pool *workPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
 	go func() {

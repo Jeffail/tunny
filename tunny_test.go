@@ -83,8 +83,8 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestTimeoutRequests(t *testing.T) {
-	n_polls  := 200
-	outChan  := make(chan int, n_polls)
+	nPolls  := 200
+	outChan  := make(chan int, nPolls)
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(time.Millisecond)
@@ -96,7 +96,7 @@ func TestTimeoutRequests(t *testing.T) {
 		return
 	}
 
-	for i := 0; i < n_polls; i++ {
+	for i := 0; i < nPolls; i++ {
 		if _, err := pool.SendWorkTimed(50, nil); err == nil {
 		} else {
 			t.Errorf("thread %v error: ", i, err)
@@ -104,7 +104,7 @@ func TestTimeoutRequests(t *testing.T) {
 		outChan <- 1
 	}
 
-	for i := 0; i < n_polls; i++ {
+	for i := 0; i < nPolls; i++ {
 		<-outChan
 	}
 
@@ -273,7 +273,7 @@ func TestCustomWorkers(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	workers := make([]TunnyWorker, 4)
-	for i, _ := range workers {
+	for i := range workers {
 		workers[i] = &(customWorker{ jobsCompleted: 0 })
 	}
 
@@ -359,7 +359,7 @@ func TestCustomExtendedWorkers(t *testing.T) {
 
 	extWorkers   := make([]*customExtendedWorker, 4)
 	tunnyWorkers := make([]TunnyWorker, 4)
-	for i, _ := range tunnyWorkers {
+	for i := range tunnyWorkers {
 		extWorkers  [i] = &(customExtendedWorker{ jobsCompleted: 0, asleep: true })
 		tunnyWorkers[i] = extWorkers[i]
 	}
@@ -370,7 +370,7 @@ func TestCustomExtendedWorkers(t *testing.T) {
 
 		_, errPool := pool.Open()
 
-		for i, _ := range extWorkers {
+		for i := range extWorkers {
 			if (*extWorkers[i]).asleep {
 				t.Errorf("Worker is still asleep!")
 			}
@@ -411,7 +411,7 @@ func TestCustomExtendedWorkers(t *testing.T) {
 		pool.Close()
 
 		expectedJobs := ((j + 1) * 10)
-		for i, _ := range extWorkers {
+		for i := range extWorkers {
 			if (*extWorkers[i]).jobsCompleted != expectedJobs {
 				t.Errorf( "Expected %v jobs completed, actually: %v",
 					expectedJobs,
@@ -434,9 +434,8 @@ func TestAsyncCalls(t *testing.T) {
 			time.Sleep(time.Millisecond * 5)
 			outChan <- intData
 			return intData
-		} else {
-			t.Errorf("Not and int!")
 		}
+		t.Errorf("Not and int!")
 		return nil
 	}).Open()
 
