@@ -258,7 +258,7 @@ Yes, you can optionally implement the following method on your worker:
 ```go
 ...
 
-func (worker *interuptableWorker) TunnyInterupt() {
+func (worker *interruptableWorker) TunnyInterrupt() {
 
 	/* This is called from a separate goroutine, so only use thread safe
 	 * methods to communicate with your worker.
@@ -274,7 +274,7 @@ func (worker *interuptableWorker) TunnyInterupt() {
 ...
 ```
 
-This method will be called in the event that a timeout occurs whilst waiting for the result. TunnyInterupt is called from a newly spawned goroutine, whose job is to call TunnyInterupt and then follow it by receiving the eventual output from the worker thread.
+This method will be called in the event that a timeout occurs whilst waiting for the result. TunnyInterrupt is called from a newly spawned goroutine, whose job is to call TunnyInterrupt and then follow it by receiving the eventual output from the worker thread.
 
 You can therefore know for certain that throughout the call the worker thread will not have received the next job. Infact, you can verify this yourself by ensuring that TunnyReady() is not called before this method exits.
 

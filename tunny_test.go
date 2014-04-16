@@ -23,13 +23,13 @@ THE SOFTWARE.
 package tunny
 
 import (
+	"runtime"
 	"testing"
 	"time"
-	"runtime"
 )
 
 func TestTimeout(t *testing.T) {
-	outChan  := make(chan int, 3)
+	outChan := make(chan int, 3)
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(100 * time.Millisecond)
@@ -47,7 +47,7 @@ func TestTimeout(t *testing.T) {
 		if _, err := pool.SendWorkTimed(20, nil); err == nil {
 			t.Errorf("No timeout triggered thread one")
 		} else {
-			taken := ( time.Since(before) / time.Millisecond )
+			taken := (time.Since(before) / time.Millisecond)
 			if taken > 21 {
 				t.Errorf("Time taken at thread one: ", taken, ", with error: ", err)
 			}
@@ -67,7 +67,7 @@ func TestTimeout(t *testing.T) {
 		if _, err := pool.SendWorkTimed(20, nil); err == nil {
 			t.Errorf("No timeout triggered thread two")
 		} else {
-			taken := ( time.Since(before) / time.Millisecond )
+			taken := (time.Since(before) / time.Millisecond)
 			if taken > 21 {
 				t.Errorf("Time taken at thread two: ", taken, ", with error: ", err)
 			}
@@ -83,8 +83,8 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestTimeoutRequests(t *testing.T) {
-	nPolls  := 200
-	outChan  := make(chan int, nPolls)
+	nPolls := 200
+	outChan := make(chan int, nPolls)
 
 	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(time.Millisecond)
@@ -123,7 +123,7 @@ func validateReturnInt(t *testing.T, expecting int, object interface{}) {
 
 func TestBasic(t *testing.T) {
 	sizePool, repeats, sleepFor, margin := 16, 2, 50, 5
-	outChan  := make(chan int, sizePool)
+	outChan := make(chan int, sizePool)
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -140,10 +140,10 @@ func TestBasic(t *testing.T) {
 		return
 	}
 
-	for i := 0; i < sizePool * repeats; i++ {
+	for i := 0; i < sizePool*repeats; i++ {
 		go func() {
 			if out, err := pool.SendWork(50); err == nil {
-				validateReturnInt (t, 100, out)
+				validateReturnInt(t, 100, out)
 			} else {
 				t.Errorf("Error returned: ", err)
 			}
@@ -153,12 +153,12 @@ func TestBasic(t *testing.T) {
 
 	before := time.Now()
 
-	for i := 0; i < sizePool * repeats; i++ {
+	for i := 0; i < sizePool*repeats; i++ {
 		<-outChan
 	}
 
-	taken    := float64( time.Since(before) ) / float64(time.Millisecond)
-	expected := float64( sleepFor + margin ) * float64(repeats)
+	taken := float64(time.Since(before)) / float64(time.Millisecond)
+	expected := float64(sleepFor+margin) * float64(repeats)
 
 	if taken > expected {
 		t.Errorf("Wrong, should have taken less than %v seconds, actually took %v", expected, taken)
@@ -171,7 +171,7 @@ func TestGeneric(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	if pool, err := CreatePoolGeneric(10).Open(); err == nil {
-		outChan  := make(chan int, 10)
+		outChan := make(chan int, 10)
 
 		for i := 0; i < 10; i++ {
 			go func(id int) {
@@ -212,7 +212,7 @@ func TestGeneric(t *testing.T) {
 }
 
 func TestExampleCase(t *testing.T) {
-	outChan  := make(chan int, 10)
+	outChan := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	pool, errPool := CreatePool(4, func(object interface{}) interface{} {
@@ -261,20 +261,20 @@ func (worker *customWorker) TunnyJob(data interface{}) interface{} {
 	 * another goroutine outside of the pool.
 	 */
 	if outputStr, ok := data.(string); ok {
-		(*worker).jobsCompleted++;
+		(*worker).jobsCompleted++
 		return ("custom job done: " + outputStr)
 	}
 	return nil
 }
 
 func TestCustomWorkers(t *testing.T) {
-	outChan  := make(chan int, 10)
+	outChan := make(chan int, 10)
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	workers := make([]TunnyWorker, 4)
 	for i := range workers {
-		workers[i] = &(customWorker{ jobsCompleted: 0 })
+		workers[i] = &(customWorker{jobsCompleted: 0})
 	}
 
 	pool, errPool := CreateCustomPool(workers).Open()
@@ -334,7 +334,7 @@ type customExtendedWorker struct {
 
 func (worker *customExtendedWorker) TunnyJob(data interface{}) interface{} {
 	if outputStr, ok := data.(string); ok {
-		(*worker).jobsCompleted++;
+		(*worker).jobsCompleted++
 		return ("custom job done: " + outputStr)
 	}
 	return nil
@@ -354,17 +354,17 @@ func (worker *customExtendedWorker) TunnyTerminate() {
 }
 
 func TestCustomExtendedWorkers(t *testing.T) {
-	outChan  := make(chan int, 10)
+	outChan := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	extWorkers   := make([]*customExtendedWorker, 4)
+	extWorkers := make([]*customExtendedWorker, 4)
 	tunnyWorkers := make([]TunnyWorker, 4)
 	for i := range tunnyWorkers {
-		extWorkers  [i] = &(customExtendedWorker{ jobsCompleted: 0, asleep: true })
+		extWorkers[i] = &(customExtendedWorker{jobsCompleted: 0, asleep: true})
 		tunnyWorkers[i] = extWorkers[i]
 	}
 
-	pool := CreateCustomPool(tunnyWorkers);
+	pool := CreateCustomPool(tunnyWorkers)
 
 	for j := 0; j < 1; j++ {
 
@@ -413,7 +413,7 @@ func TestCustomExtendedWorkers(t *testing.T) {
 		expectedJobs := ((j + 1) * 10)
 		for i := range extWorkers {
 			if (*extWorkers[i]).jobsCompleted != expectedJobs {
-				t.Errorf( "Expected %v jobs completed, actually: %v",
+				t.Errorf("Expected %v jobs completed, actually: %v",
 					expectedJobs,
 					(*extWorkers[i]).jobsCompleted,
 				)
@@ -474,31 +474,31 @@ func TestAsyncCalls(t *testing.T) {
 	pool.Close()
 }
 
-type interuptableWorker struct {
+type interruptableWorker struct {
 	stopChan chan int
 }
 
-func (worker *interuptableWorker) TunnyJob(data interface{}) interface{} {
+func (worker *interruptableWorker) TunnyJob(data interface{}) interface{} {
 	select {
 	case <-time.After(100 * time.Millisecond):
 		return 25
-	case <- worker.stopChan:
+	case <-worker.stopChan:
 		return 50
 	}
 	return 25
 }
 
-func (worker *interuptableWorker) TunnyReady() bool {
+func (worker *interruptableWorker) TunnyReady() bool {
 	return true
 }
 
-func (worker *interuptableWorker) TunnyInterupt() {
-	worker.stopChan<-1
+func (worker *interruptableWorker) TunnyInterrupt() {
+	worker.stopChan <- 1
 }
 
 func Test(t *testing.T) {
 	workers := make([]TunnyWorker, 1)
-	workers[0] = &interuptableWorker{ make(chan int, 1) }
+	workers[0] = &interruptableWorker{make(chan int, 1)}
 
 	pool, poolErr := CreateCustomPool(workers).Open()
 
@@ -509,7 +509,7 @@ func Test(t *testing.T) {
 
 	res, err := pool.SendWorkTimed(25, 50)
 	if err == nil || res == 25 {
-		t.Errorf("Interupt not activated!")
+		t.Errorf("Interrupt not activated!")
 	}
 
 	pool.Close()
@@ -532,18 +532,18 @@ func TestQueueing(t *testing.T) {
 	}
 
 	outChan := make(chan int)
-	inChan  := make(chan int)
+	inChan := make(chan int)
 
 	for i := 0; i < numJobs; i++ {
 		go func() {
 			val := <-inChan
 			result, _ := pool.SendWork(val)
-			outChan<-result.(int)
+			outChan <- result.(int)
 		}()
 	}
 
 	for i := 0; i < numJobs; i++ {
-		inChan<-i
+		inChan <- i
 		time.Sleep(5 * time.Millisecond)
 	}
 

@@ -23,8 +23,8 @@ THE SOFTWARE.
 package tunny
 
 import (
-    "sync/atomic"
-    "time"
+	"sync/atomic"
+	"time"
 )
 
 type workerWrapper struct {
@@ -51,7 +51,7 @@ func (wrapper *workerWrapper) Loop() {
 	wrapper.readyChan <- 1
 
 	for data := range wrapper.jobChan {
-		wrapper.outputChan <- wrapper.worker.TunnyJob( data )
+		wrapper.outputChan <- wrapper.worker.TunnyJob(data)
 		for !wrapper.worker.TunnyReady() {
 			if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
 				break
@@ -71,8 +71,8 @@ func (wrapper *workerWrapper) Open() {
 		extWorker.TunnyInitialize()
 	}
 
-	wrapper.readyChan  = make(chan int)
-	wrapper.jobChan    = make(chan interface{})
+	wrapper.readyChan = make(chan int)
+	wrapper.jobChan = make(chan interface{})
 	wrapper.outputChan = make(chan interface{})
 
 	atomic.SwapUint32(&wrapper.poolOpen, uint32(1))
@@ -91,10 +91,10 @@ func (wrapper *workerWrapper) Close() {
 func (wrapper *workerWrapper) Join() {
 	// Ensure that both the ready and output channels are closed
 	for {
-		_, readyOpen  := <-wrapper.readyChan
+		_, readyOpen := <-wrapper.readyChan
 		_, outputOpen := <-wrapper.outputChan
 		if !readyOpen && !outputOpen {
-			break;
+			break
 		}
 	}
 
@@ -103,8 +103,8 @@ func (wrapper *workerWrapper) Join() {
 	}
 }
 
-func (wrapper *workerWrapper) Interupt() {
-	if extWorker, ok := wrapper.worker.(TunnyInteruptable); ok {
-		extWorker.TunnyInterupt()
+func (wrapper *workerWrapper) Interrupt() {
+	if extWorker, ok := wrapper.worker.(TunnyInterruptable); ok {
+		extWorker.TunnyInterrupt()
 	}
 }

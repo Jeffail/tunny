@@ -24,11 +24,11 @@ THE SOFTWARE.
 package tunny
 
 import (
-	"sync/atomic"
-	"reflect"
 	"errors"
-	"time"
+	"reflect"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 /*
@@ -37,14 +37,13 @@ TunnyWorker - The basic interface of a tunny worker.
 type TunnyWorker interface {
 
 	// Called for each job, expects the result to be returned synchronously
-	TunnyJob(interface{}) (interface{})
+	TunnyJob(interface{}) interface{}
 
 	// Called after each job, this indicates whether the worker is ready for the next job.
 	// The default implementation is to return true always. If false is returned then the
 	// method is called every five milliseconds until either true is returned or the pool
 	// is closed.
 	TunnyReady() bool
-
 }
 
 /*
@@ -58,18 +57,16 @@ type TunnyExtendedWorker interface {
 
 	// Called when the pool is closed, this will be called after all jobs are completed.
 	TunnyTerminate()
-
 }
 
 /*
-TunnyInteruptable - An optional interface that can be implemented in order to allow the
+TunnyInterruptable - An optional interface that can be implemented in order to allow the
 worker to drop jobs when they are abandoned.
 */
-type TunnyInteruptable interface {
+type TunnyInterruptable interface {
 
 	// Called when the current job has been abandoned by the client.
-	TunnyInterupt()
-
+	TunnyInterrupt()
 }
 
 /*
@@ -77,7 +74,7 @@ Default and very basic implementation of a tunny worker. This worker holds a clo
 is assigned at construction, and this closure is called on each job.
 */
 type tunnyDefaultWorker struct {
-	job *func(interface{}) (interface{})
+	job *func(interface{}) interface{}
 }
 
 func (worker *tunnyDefaultWorker) TunnyJob(data interface{}) interface{} {
@@ -103,7 +100,7 @@ type workPool struct {
 }
 
 func (pool *workPool) isRunning() bool {
-	return ( atomic.LoadUint32(&pool.running) == 1 )
+	return (atomic.LoadUint32(&pool.running) == 1)
 }
 
 func (pool *workPool) setRunning(running bool) {
@@ -123,13 +120,13 @@ func (pool *workPool) Open() (*workPool, error) {
 
 	if !pool.isRunning() {
 
-		pool.selects = make( []reflect.SelectCase, len(pool.workers) )
+		pool.selects = make([]reflect.SelectCase, len(pool.workers))
 
 		for i, workerWrapper := range pool.workers {
 			workerWrapper.Open()
 
-			pool.selects[i] = reflect.SelectCase {
-				Dir: reflect.SelectRecv,
+			pool.selects[i] = reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
 				Chan: reflect.ValueOf(workerWrapper.readyChan),
 			}
 		}
@@ -170,12 +167,12 @@ CreatePool - Creates a pool of workers, and takes a closure argument which is th
 to perform for each job.
 */
 func CreatePool(numWorkers int, job func(interface{}) interface{}) *workPool {
-	pool := workPool { running: 0 }
+	pool := workPool{running: 0}
 
-	pool.workers = make ([]*workerWrapper, numWorkers)
+	pool.workers = make([]*workerWrapper, numWorkers)
 	for i := range pool.workers {
-		newWorker := workerWrapper {
-			worker: &(tunnyDefaultWorker { &job }),
+		newWorker := workerWrapper{
+			worker: &(tunnyDefaultWorker{&job}),
 		}
 		pool.workers[i] = &newWorker
 	}
@@ -189,7 +186,7 @@ generic workers you send a closure (func()) which is the job to perform.
 */
 func CreatePoolGeneric(numWorkers int) *workPool {
 
-	return CreatePool(numWorkers, func (jobCall interface{}) interface{} {
+	return CreatePool(numWorkers, func(jobCall interface{}) interface{} {
 		if method, ok := jobCall.(func()); ok {
 			method()
 			return nil
@@ -202,14 +199,14 @@ func CreatePoolGeneric(numWorkers int) *workPool {
 /*
 CreateCustomPool - Creates a pool for an array of custom workers. The custom workers
 must implement TunnyWorker, and may also optionally implement TunnyExtendedWorker and
-TunnyInteruptable.
+TunnyInterruptable.
 */
 func CreateCustomPool(customWorkers []TunnyWorker) *workPool {
-	pool := workPool { running: 0 }
+	pool := workPool{running: 0}
 
-	pool.workers = make ([]*workerWrapper, len(customWorkers))
+	pool.workers = make([]*workerWrapper, len(customWorkers))
 	for i := range pool.workers {
-		newWorker := workerWrapper {
+		newWorker := workerWrapper{
 			worker: customWorkers[i],
 		}
 		pool.workers[i] = &newWorker
@@ -230,15 +227,15 @@ func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 		before := time.Now()
 
 		// Create new selectcase[] and add time out case
-		selectCases := append(pool.selects[:], reflect.SelectCase {
-			Dir: reflect.SelectRecv,
+		selectCases := append(pool.selects[:], reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(time.After(milliTimeout * time.Millisecond)),
 		})
 
 		// Wait for workers, or time out
 		if chosen, _, ok := reflect.Select(selectCases); ok {
 
-			if chosen < ( len(selectCases) - 1 ) {
+			if chosen < (len(selectCases) - 1) {
 				pool.workers[chosen].jobChan <- jobData
 
 				// Wait for response, or time out
@@ -248,13 +245,13 @@ func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 						return nil, errors.New("worker was closed before reaching a result")
 					}
 					return data, nil
-				case <- time.After((milliTimeout * time.Millisecond) - time.Since(before)):
+				case <-time.After((milliTimeout * time.Millisecond) - time.Since(before)):
 					/* If we time out here we also need to ensure that the output is still
 					 * collected and that the worker can move on. Therefore, we fork the
 					 * waiting process into a new goroutine.
 					 */
 					go func() {
-						pool.workers[chosen].Interupt()
+						pool.workers[chosen].Interrupt()
 						<-pool.workers[chosen].outputChan
 					}()
 					return nil, errors.New("request timed out whilst waiting for job to complete")
