@@ -24,22 +24,26 @@ package tunny
 
 import (
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestTimeout(t *testing.T) {
-	outChan := make(chan int, 3)
+	wg := new(sync.WaitGroup)
+	wg.Add(3)
 
-	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
+	pool, err := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(100 * time.Millisecond)
 		return nil
 	}).Open()
 
-	if errPool != nil {
-		t.Errorf("Error starting pool: ", errPool)
+	if err != nil {
+		t.Errorf("Error starting pool: ", err)
 		return
 	}
+
+	defer pool.Close()
 
 	before := time.Now()
 
@@ -52,14 +56,13 @@ func TestTimeout(t *testing.T) {
 				t.Errorf("Time taken at thread one: ", taken, ", with error: ", err)
 			}
 		}
-		outChan <- 1
+		wg.Done()
 
 		go func() {
-			if _, err := pool.SendWork(nil); err == nil {
-			} else {
+			if _, err := pool.SendWork(nil); err != nil {
 				t.Errorf("Error at thread three: ", err)
 			}
-			outChan <- 1
+			wg.Done()
 		}()
 	}()
 
@@ -72,43 +75,37 @@ func TestTimeout(t *testing.T) {
 				t.Errorf("Time taken at thread two: ", taken, ", with error: ", err)
 			}
 		}
-		outChan <- 1
+		wg.Done()
 	}()
 
-	for i := 0; i < 3; i++ {
-		<-outChan
-	}
-
-	pool.Close()
+	wg.Wait()
 }
 
 func TestTimeoutRequests(t *testing.T) {
 	nPolls := 200
-	outChan := make(chan int, nPolls)
+	wg := new(sync.WaitGroup)
+	wg.Add(nPolls)
 
-	pool, errPool := CreatePool(1, func(object interface{}) interface{} {
+	pool, err := CreatePool(1, func(object interface{}) interface{} {
 		time.Sleep(time.Millisecond)
 		return nil
 	}).Open()
 
-	if errPool != nil {
-		t.Errorf("Error starting pool: ", errPool)
+	if err != nil {
+		t.Errorf("Error starting pool: ", err)
 		return
 	}
 
+	defer pool.Close()
+
 	for i := 0; i < nPolls; i++ {
-		if _, err := pool.SendWorkTimed(50, nil); err == nil {
-		} else {
+		if _, err := pool.SendWorkTimed(50, nil); err != nil {
 			t.Errorf("thread %v error: ", i, err)
 		}
-		outChan <- 1
+		wg.Done()
 	}
 
-	for i := 0; i < nPolls; i++ {
-		<-outChan
-	}
-
-	pool.Close()
+	wg.Wait()
 }
 
 func validateReturnInt(t *testing.T, expecting int, object interface{}) {
@@ -123,11 +120,12 @@ func validateReturnInt(t *testing.T, expecting int, object interface{}) {
 
 func TestBasic(t *testing.T) {
 	sizePool, repeats, sleepFor, margin := 16, 2, 50, 5
-	outChan := make(chan int, sizePool)
+	wg := new(sync.WaitGroup)
+	wg.Add(sizePool * repeats)
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	pool, errPool := CreatePool(sizePool, func(object interface{}) interface{} {
+	pool, err := CreatePool(sizePool, func(object interface{}) interface{} {
 		time.Sleep(time.Duration(sleepFor) * time.Millisecond)
 		if w, ok := object.(int); ok {
 			return w * 2
@@ -135,10 +133,12 @@ func TestBasic(t *testing.T) {
 		return "Not an int!"
 	}).Open()
 
-	if errPool != nil {
-		t.Errorf("Error starting pool: ", errPool)
+	if err != nil {
+		t.Errorf("Error starting pool: ", err)
 		return
 	}
+
+	defer pool.Close()
 
 	for i := 0; i < sizePool*repeats; i++ {
 		go func() {
@@ -147,15 +147,13 @@ func TestBasic(t *testing.T) {
 			} else {
 				t.Errorf("Error returned: ", err)
 			}
-			outChan <- 1
+			wg.Done()
 		}()
 	}
 
 	before := time.Now()
 
-	for i := 0; i < sizePool*repeats; i++ {
-		<-outChan
-	}
+	wg.Wait()
 
 	taken := float64(time.Since(before)) / float64(time.Millisecond)
 	expected := float64(sleepFor+margin) * float64(repeats)
@@ -163,67 +161,66 @@ func TestBasic(t *testing.T) {
 	if taken > expected {
 		t.Errorf("Wrong, should have taken less than %v seconds, actually took %v", expected, taken)
 	}
-
-	pool.Close()
 }
 
 func TestGeneric(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	if pool, err := CreatePoolGeneric(10).Open(); err == nil {
-		outChan := make(chan int, 10)
-
-		for i := 0; i < 10; i++ {
-			go func(id int) {
-				one, err := pool.SendWork(func() {
-					outChan <- id
-				})
-
-				if err != nil {
-					t.Errorf("Generic call timed out!")
-				}
-
-				if one != nil {
-					if funcerr, ok := one.(error); ok {
-						t.Errorf("Generic worker call: ", funcerr)
-					} else {
-						t.Errorf("Unexpected result from generic worker")
-					}
-				}
-			}(i)
-		}
-
-		results := make([]int, 10)
-
-		for i := 0; i < 10; i++ {
-			value := <-outChan
-			if results[value] != 0 || value > 9 || value < 0 {
-				t.Errorf("duplicate or incorrect key: %v", value)
-			}
-			results[value] = 1
-		}
-
-		pool.Close()
-
-	} else {
+	pool, err := CreatePoolGeneric(10).Open()
+	if err != nil {
 		t.Errorf("Error starting pool: ", err)
 		return
 	}
+
+	outChan := make(chan int, 10)
+
+	for i := 0; i < 10; i++ {
+		go func(id int) {
+			one, err := pool.SendWork(func() {
+				outChan <- id
+			})
+
+			if err != nil {
+				t.Errorf("Generic call timed out!")
+			}
+
+			if one != nil {
+				if funcerr, ok := one.(error); ok {
+					t.Errorf("Generic worker call: ", funcerr)
+				} else {
+					t.Errorf("Unexpected result from generic worker")
+				}
+			}
+		}(i)
+	}
+
+	results := make([]int, 10)
+
+	for i := 0; i < 10; i++ {
+		value := <-outChan
+		if results[value] != 0 || value > 9 || value < 0 {
+			t.Errorf("duplicate or incorrect key: %v", value)
+		}
+		results[value] = 1
+	}
+
+	pool.Close()
 }
 
 func TestExampleCase(t *testing.T) {
-	outChan := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	wg := new(sync.WaitGroup)
+	wg.Add(10)
 
-	pool, errPool := CreatePool(4, func(object interface{}) interface{} {
+	pool, err := CreatePool(4, func(object interface{}) interface{} {
 		if str, ok := object.(string); ok {
 			return "job done: " + str
 		}
 		return nil
 	}).Open()
 
-	if errPool != nil {
-		t.Errorf("Error starting pool: ", errPool)
+	if err != nil {
+		t.Errorf("Error starting pool: ", err)
 		return
 	}
 
@@ -237,14 +234,11 @@ func TestExampleCase(t *testing.T) {
 			} else {
 				t.Errorf("Error returned: ", err)
 			}
-			outChan <- 1
+			wg.Done()
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
-		<-outChan
-	}
-
+	wg.Wait()
 	pool.Close()
 }
 
@@ -268,7 +262,8 @@ func (worker *customWorker) TunnyJob(data interface{}) interface{} {
 }
 
 func TestCustomWorkers(t *testing.T) {
-	outChan := make(chan int, 10)
+	wg := new(sync.WaitGroup)
+	wg.Add(10)
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -277,10 +272,10 @@ func TestCustomWorkers(t *testing.T) {
 		workers[i] = &(customWorker{jobsCompleted: 0})
 	}
 
-	pool, errPool := CreateCustomPool(workers).Open()
+	pool, err := CreateCustomPool(workers).Open()
 
-	if errPool != nil {
-		t.Errorf("Error starting pool: ", errPool)
+	if err != nil {
+		t.Errorf("Error starting pool: ", err)
 		return
 	}
 
@@ -300,13 +295,11 @@ func TestCustomWorkers(t *testing.T) {
 			} else {
 				t.Errorf("Error returned: ", err)
 			}
-			outChan <- 1
+			wg.Done()
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
-		<-outChan
-	}
+	wg.Wait()
 
 	/* After this call we should be able to guarantee that no other go routine is
 	 * accessing the workers.
@@ -354,8 +347,8 @@ func (worker *customExtendedWorker) TunnyTerminate() {
 }
 
 func TestCustomExtendedWorkers(t *testing.T) {
-	outChan := make(chan int, 10)
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	wg := new(sync.WaitGroup)
 
 	extWorkers := make([]*customExtendedWorker, 4)
 	tunnyWorkers := make([]TunnyWorker, 4)
@@ -367,8 +360,8 @@ func TestCustomExtendedWorkers(t *testing.T) {
 	pool := CreateCustomPool(tunnyWorkers)
 
 	for j := 0; j < 1; j++ {
-
-		_, errPool := pool.Open()
+		wg.Add(40)
+		_, err := pool.Open()
 
 		for i := range extWorkers {
 			if (*extWorkers[i]).asleep {
@@ -376,8 +369,8 @@ func TestCustomExtendedWorkers(t *testing.T) {
 			}
 		}
 
-		if errPool != nil {
-			t.Errorf("Error starting pool: ", errPool)
+		if err != nil {
+			t.Errorf("Error starting pool: ", err)
 			return
 		}
 
@@ -397,13 +390,11 @@ func TestCustomExtendedWorkers(t *testing.T) {
 				} else {
 					t.Errorf("Error returned: ", err)
 				}
-				outChan <- 1
+				wg.Done()
 			}()
 		}
 
-		for i := 0; i < 40; i++ {
-			<-outChan
-		}
+		wg.Wait()
 
 		/* After this call we should be able to guarantee that no other go routine is
 		 * accessing the workers.
@@ -427,15 +418,16 @@ func TestCustomExtendedWorkers(t *testing.T) {
 
 func TestAsyncCalls(t *testing.T) {
 	numWorkers, numData := 4, 400
-	outChan := make(chan int, numData)
+	wg := new(sync.WaitGroup)
+	wg.Add(numData)
 
 	pool, err := CreatePool(numWorkers, func(data interface{}) interface{} {
 		if intData, ok := data.(int); ok {
 			time.Sleep(time.Millisecond * 5)
-			outChan <- intData
+			wg.Done()
 			return intData
 		}
-		t.Errorf("Not and int!")
+		t.Errorf("Not an int!")
 		return nil
 	}).Open()
 
@@ -448,13 +440,12 @@ func TestAsyncCalls(t *testing.T) {
 		pool.SendWorkAsync(i, nil)
 	}
 
-	for i := 0; i < numData; i++ {
-		<-outChan
-	}
+	wg.Wait()
 
 	pool.Close()
-
 	pool.Open()
+
+	wg.Add(numData)
 
 	for i := 0; i < numData; i++ {
 		pool.SendWorkAsync(i, func(val interface{}, workErr error) {
@@ -467,9 +458,7 @@ func TestAsyncCalls(t *testing.T) {
 		})
 	}
 
-	for i := 0; i < numData; i++ {
-		<-outChan
-	}
+	wg.Wait()
 
 	pool.Close()
 }

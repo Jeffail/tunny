@@ -6,6 +6,8 @@ Use cases for tunny are any situation where a large and constant flood of jobs a
 
 Tunny works internally by allowing workers to pick up jobs ad-hoc rather than assigning each their own queue. There are many advantages to this method but it helps the most when the jobs vary greatly in processing time (like language detection or sentiment analysis).
 
+https://godoc.org/github.com/Jeffail/tunny
+
 ##How to install:
 
 ```bash
@@ -27,9 +29,9 @@ import (
 ...
 
 func CalcRoots (inputs []float64) []float64 {
-	numCPUs  := runtime.NumCPU()
-	numJobs  := len(inputs)
-	outputs  := make( []float64, numJobs )
+	numCPUs := runtime.NumCPU()
+	numJobs := len(inputs)
+	outputs := make([]float64, numJobs)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(numJobs)
@@ -40,7 +42,7 @@ func CalcRoots (inputs []float64) []float64 {
 	 * if each worker needs to carry its own state then this can also
 	 * be accomplished, read on.
 	 */
-	pool, _ := tunny.CreatePool(numCPUs, func( object interface{} ) ( interface{} ) {
+	pool, _ := tunny.CreatePool(numCPUs, func(object interface{}) interface{} {
 
 		// Hard work here
 		value, _ := object.(float64)
@@ -186,13 +188,13 @@ func (worker *customWorker) TunnyJob(data interface{}) interface{} {
 	 * the pool.
 	 */
 	if outputStr, ok := data.(string); ok {
-		return ("custom job done: " + outputStr )
+		return ("custom job done: " + outputStr)
 	}
 	return nil
 }
 
 func TestCustomWorkers (t *testing.T) {
-	outChan  := make(chan int, 10)
+	outChan := make(chan int, 10)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(10)
@@ -297,7 +299,7 @@ for i := 0; i < 100; i++ {
 	pool.SendWorkAsync(func() {
 
 		// Work here
-		outputChan <-doHardJobOrWhatever()
+		outputChan <- doHardJobOrWhatever()
 
 	}, nil) // nil here because the result is returned in the closure
 }
