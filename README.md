@@ -1,4 +1,4 @@
-![Tunny](http://www.creepybit.co.uk/images/tunny_logo_small.png?v=3 "Tunny")
+![Tunny](tunny_logo.png "Tunny")
 
 Tunny is a golang library for creating and managing a goroutine pool, aiming to be simple, intuitive, ground breaking, revolutionary, world dominating and stuff.
 

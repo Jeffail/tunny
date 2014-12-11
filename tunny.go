@@ -146,18 +146,14 @@ func (pool *workPool) Close() error {
 	defer pool.statusMutex.Unlock()
 
 	if pool.isRunning() {
-
 		for _, workerWrapper := range pool.workers {
 			workerWrapper.Close()
 		}
-
 		for _, workerWrapper := range pool.workers {
 			workerWrapper.Join()
 		}
-
 		pool.setRunning(false)
 		return nil
-
 	}
 	return errors.New("cannot close when the pool is not running")
 }
