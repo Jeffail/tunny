@@ -86,24 +86,24 @@ func (worker *tunnyDefaultWorker) TunnyReady() bool {
 }
 
 /*
-workPool contains the structures and methods required to communicate with your pool, it must
+WorkPool contains the structures and methods required to communicate with your pool, it must
 be opened before sending work and closed when all jobs are completed.
 
 You may open and close a pool as many times as you wish, calling close is a blocking call that
 guarantees all goroutines are stopped.
 */
-type workPool struct {
+type WorkPool struct {
 	workers     []*workerWrapper
 	selects     []reflect.SelectCase
 	statusMutex sync.RWMutex
 	running     uint32
 }
 
-func (pool *workPool) isRunning() bool {
+func (pool *WorkPool) isRunning() bool {
 	return (atomic.LoadUint32(&pool.running) == 1)
 }
 
-func (pool *workPool) setRunning(running bool) {
+func (pool *WorkPool) setRunning(running bool) {
 	if running {
 		atomic.SwapUint32(&pool.running, 1)
 	} else {
@@ -114,7 +114,7 @@ func (pool *workPool) setRunning(running bool) {
 /*
 Open all channels and launch the background goroutines managed by the pool.
 */
-func (pool *workPool) Open() (*workPool, error) {
+func (pool *WorkPool) Open() (*WorkPool, error) {
 	pool.statusMutex.Lock()
 	defer pool.statusMutex.Unlock()
 
@@ -141,7 +141,7 @@ func (pool *workPool) Open() (*workPool, error) {
 /*
 Close all channels and goroutines managed by the pool.
 */
-func (pool *workPool) Close() error {
+func (pool *WorkPool) Close() error {
 	pool.statusMutex.Lock()
 	defer pool.statusMutex.Unlock()
 
@@ -162,8 +162,8 @@ func (pool *workPool) Close() error {
 CreatePool - Creates a pool of workers, and takes a closure argument which is the action
 to perform for each job.
 */
-func CreatePool(numWorkers int, job func(interface{}) interface{}) *workPool {
-	pool := workPool{running: 0}
+func CreatePool(numWorkers int, job func(interface{}) interface{}) *WorkPool {
+	pool := WorkPool{running: 0}
 
 	pool.workers = make([]*workerWrapper, numWorkers)
 	for i := range pool.workers {
@@ -180,7 +180,7 @@ func CreatePool(numWorkers int, job func(interface{}) interface{}) *workPool {
 CreatePoolGeneric - Creates a pool of generic workers. When sending work to a pool of
 generic workers you send a closure (func()) which is the job to perform.
 */
-func CreatePoolGeneric(numWorkers int) *workPool {
+func CreatePoolGeneric(numWorkers int) *WorkPool {
 
 	return CreatePool(numWorkers, func(jobCall interface{}) interface{} {
 		if method, ok := jobCall.(func()); ok {
@@ -197,8 +197,8 @@ CreateCustomPool - Creates a pool for an array of custom workers. The custom wor
 must implement TunnyWorker, and may also optionally implement TunnyExtendedWorker and
 TunnyInterruptable.
 */
-func CreateCustomPool(customWorkers []TunnyWorker) *workPool {
-	pool := workPool{running: 0}
+func CreateCustomPool(customWorkers []TunnyWorker) *WorkPool {
+	pool := WorkPool{running: 0}
 
 	pool.workers = make([]*workerWrapper, len(customWorkers))
 	for i := range pool.workers {
@@ -215,7 +215,7 @@ func CreateCustomPool(customWorkers []TunnyWorker) *workPool {
 SendWorkTimed - Send a job to a worker and return the result, this is a synchronous
 call with a timeout.
 */
-func (pool *workPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
+func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
 	pool.statusMutex.RLock()
 	defer pool.statusMutex.RUnlock()
 
@@ -268,7 +268,7 @@ SendWorkTimedAsync - Send a timed job to a worker without blocking, and optional
 send the result to a receiving closure. You may set the closure to nil if no
 further actions are required.
 */
-func (pool *workPool) SendWorkTimedAsync(
+func (pool *WorkPool) SendWorkTimedAsync(
 	milliTimeout time.Duration,
 	jobData interface{},
 	after func(interface{}, error),
@@ -284,7 +284,7 @@ func (pool *workPool) SendWorkTimedAsync(
 /*
 SendWork - Send a job to a worker and return the result, this is a synchronous call.
 */
-func (pool *workPool) SendWork(jobData interface{}) (interface{}, error) {
+func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 	pool.statusMutex.RLock()
 	defer pool.statusMutex.RUnlock()
 
@@ -308,7 +308,7 @@ SendWorkAsync - Send a job to a worker without blocking, and optionally send the
 result to a receiving closure. You may set the closure to nil if no further actions
 are required.
 */
-func (pool *workPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
+func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
 	go func() {
 		result, err := pool.SendWork(jobData)
 		if after != nil {
