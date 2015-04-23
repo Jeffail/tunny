@@ -23,544 +23,215 @@ THE SOFTWARE.
 package tunny
 
 import (
-	"runtime"
 	"sync"
 	"testing"
-	"time"
 )
 
-func TestTimeout(t *testing.T) {
-	wg := new(sync.WaitGroup)
-	wg.Add(3)
+/*--------------------------------------------------------------------------------------------------
+ */
 
-	pool, err := CreatePool(1, func(object interface{}) interface{} {
-		time.Sleep(100 * time.Millisecond)
-		return nil
+func TestBasicJob(t *testing.T) {
+	pool, err := CreatePool(1, func(in interface{}) interface{} {
+		intVal := in.(int)
+		return intVal * 2
 	}).Open()
-
 	if err != nil {
-		t.Errorf("Error starting pool: ", err)
+		t.Errorf("Failed to create pool: %v", err)
 		return
 	}
-
 	defer pool.Close()
 
-	before := time.Now()
-
-	go func() {
-		if _, err := pool.SendWorkTimed(20, nil); err == nil {
-			t.Errorf("No timeout triggered thread one")
-		} else {
-			taken := (time.Since(before) / time.Millisecond)
-			if taken > 21 {
-				t.Errorf("Time taken at thread one: ", taken, ", with error: ", err)
-			}
-		}
-		wg.Done()
-
-		go func() {
-			if _, err := pool.SendWork(nil); err != nil {
-				t.Errorf("Error at thread three: ", err)
-			}
-			wg.Done()
-		}()
-	}()
-
-	go func() {
-		if _, err := pool.SendWorkTimed(20, nil); err == nil {
-			t.Errorf("No timeout triggered thread two")
-		} else {
-			taken := (time.Since(before) / time.Millisecond)
-			if taken > 21 {
-				t.Errorf("Time taken at thread two: ", taken, ", with error: ", err)
-			}
-		}
-		wg.Done()
-	}()
-
-	wg.Wait()
-}
-
-func TestTimeoutRequests(t *testing.T) {
-	nPolls := 200
-	wg := new(sync.WaitGroup)
-	wg.Add(nPolls)
-
-	pool, err := CreatePool(1, func(object interface{}) interface{} {
-		time.Sleep(time.Millisecond)
-		return nil
-	}).Open()
-
-	if err != nil {
-		t.Errorf("Error starting pool: ", err)
-		return
-	}
-
-	defer pool.Close()
-
-	for i := 0; i < nPolls; i++ {
-		if _, err := pool.SendWorkTimed(50, nil); err != nil {
-			t.Errorf("thread %v error: ", i, err)
-		}
-		wg.Done()
-	}
-
-	wg.Wait()
-}
-
-func validateReturnInt(t *testing.T, expecting int, object interface{}) {
-	if w, ok := object.(int); ok {
-		if w != expecting {
-			t.Errorf("Wrong, expected %v, got %v", expecting, w)
-		}
-	} else {
-		t.Errorf("Wrong, expected int")
-	}
-}
-
-func TestBasic(t *testing.T) {
-	sizePool, repeats, sleepFor, margin := 16, 2, 50, 5
-	wg := new(sync.WaitGroup)
-	wg.Add(sizePool * repeats)
-
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	pool, err := CreatePool(sizePool, func(object interface{}) interface{} {
-		time.Sleep(time.Duration(sleepFor) * time.Millisecond)
-		if w, ok := object.(int); ok {
-			return w * 2
-		}
-		return "Not an int!"
-	}).Open()
-
-	if err != nil {
-		t.Errorf("Error starting pool: ", err)
-		return
-	}
-
-	defer pool.Close()
-
-	for i := 0; i < sizePool*repeats; i++ {
-		go func() {
-			if out, err := pool.SendWork(50); err == nil {
-				validateReturnInt(t, 100, out)
-			} else {
-				t.Errorf("Error returned: ", err)
-			}
-			wg.Done()
-		}()
-	}
-
-	before := time.Now()
-
-	wg.Wait()
-
-	taken := float64(time.Since(before)) / float64(time.Millisecond)
-	expected := float64(sleepFor+margin) * float64(repeats)
-
-	if taken > expected {
-		t.Errorf("Wrong, should have taken less than %v seconds, actually took %v", expected, taken)
-	}
-}
-
-func TestGeneric(t *testing.T) {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	pool, err := CreatePoolGeneric(10).Open()
-	if err != nil {
-		t.Errorf("Error starting pool: ", err)
-		return
-	}
-
-	outChan := make(chan int, 10)
-
-	for i := 0; i < 10; i++ {
-		go func(id int) {
-			one, err := pool.SendWork(func() {
-				outChan <- id
-			})
-
-			if err != nil {
-				t.Errorf("Generic call timed out!")
-			}
-
-			if one != nil {
-				if funcerr, ok := one.(error); ok {
-					t.Errorf("Generic worker call: ", funcerr)
-				} else {
-					t.Errorf("Unexpected result from generic worker")
-				}
-			}
-		}(i)
-	}
-
-	results := make([]int, 10)
-
-	for i := 0; i < 10; i++ {
-		value := <-outChan
-		if results[value] != 0 || value > 9 || value < 0 {
-			t.Errorf("duplicate or incorrect key: %v", value)
-		}
-		results[value] = 1
-	}
-
-	pool.Close()
-}
-
-func TestExampleCase(t *testing.T) {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	wg := new(sync.WaitGroup)
-	wg.Add(10)
-
-	pool, err := CreatePool(4, func(object interface{}) interface{} {
-		if str, ok := object.(string); ok {
-			return "job done: " + str
-		}
-		return nil
-	}).Open()
-
-	if err != nil {
-		t.Errorf("Error starting pool: ", err)
-		return
-	}
-
-	for i := 0; i < 10; i++ {
-		go func() {
-			if value, err := pool.SendWork("hello world"); err == nil {
-				if _, ok := value.(string); ok {
-				} else {
-					t.Errorf("Not a string!")
-				}
-			} else {
-				t.Errorf("Error returned: ", err)
-			}
-			wg.Done()
-		}()
-	}
-
-	wg.Wait()
-	pool.Close()
-}
-
-type customWorker struct {
-	jobsCompleted int
-}
-
-func (worker *customWorker) TunnyReady() bool {
-	return true
-}
-
-func (worker *customWorker) TunnyJob(data interface{}) interface{} {
-	/* There's no need for thread safety paradigms here unless the data is being accessed from
-	 * another goroutine outside of the pool.
-	 */
-	if outputStr, ok := data.(string); ok {
-		(*worker).jobsCompleted++
-		return ("custom job done: " + outputStr)
-	}
-	return nil
-}
-
-func TestCustomWorkers(t *testing.T) {
-	wg := new(sync.WaitGroup)
-	wg.Add(10)
-
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	workers := make([]TunnyWorker, 4)
-	for i := range workers {
-		workers[i] = &(customWorker{jobsCompleted: 0})
-	}
-
-	pool, err := CreateCustomPool(workers).Open()
-
-	if err != nil {
-		t.Errorf("Error starting pool: ", err)
-		return
-	}
-
-	for i := 0; i < 10; i++ {
-		/* Calling SendWork is thread safe, go ahead and call it from any goroutine.
-		 * The call will block until a worker is ready and has completed the job.
-		 */
-		go func() {
-			if value, err := pool.SendWork("hello world"); err == nil {
-				if str, ok := value.(string); ok {
-					if str != "custom job done: hello world" {
-						t.Errorf("Unexpected output from custom worker")
-					}
-				} else {
-					t.Errorf("Not a string!")
-				}
-			} else {
-				t.Errorf("Error returned: ", err)
-			}
-			wg.Done()
-		}()
-	}
-
-	wg.Wait()
-
-	/* After this call we should be able to guarantee that no other go routine is
-	 * accessing the workers.
-	 */
-	pool.Close()
-
-	totalJobs := 0
-	for i := 0; i < len(workers); i++ {
-		if custom, ok := workers[i].(*customWorker); ok {
-			totalJobs += (*custom).jobsCompleted
-		} else {
-			t.Errorf("could not cast to customWorker")
-		}
-	}
-
-	if totalJobs != 10 {
-		t.Errorf("Total jobs expected: %v, actual: %v", 10, totalJobs)
-	}
-}
-
-type customExtendedWorker struct {
-	jobsCompleted int
-	asleep        bool
-}
-
-func (worker *customExtendedWorker) TunnyJob(data interface{}) interface{} {
-	if outputStr, ok := data.(string); ok {
-		(*worker).jobsCompleted++
-		return ("custom job done: " + outputStr)
-	}
-	return nil
-}
-
-// Do 10 jobs and then stop.
-func (worker *customExtendedWorker) TunnyReady() bool {
-	return !(*worker).asleep && ((*worker).jobsCompleted < 10)
-}
-
-func (worker *customExtendedWorker) TunnyInitialize() {
-	(*worker).asleep = false
-}
-
-func (worker *customExtendedWorker) TunnyTerminate() {
-	(*worker).asleep = true
-}
-
-func TestCustomExtendedWorkers(t *testing.T) {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	wg := new(sync.WaitGroup)
-
-	extWorkers := make([]*customExtendedWorker, 4)
-	tunnyWorkers := make([]TunnyWorker, 4)
-	for i := range tunnyWorkers {
-		extWorkers[i] = &(customExtendedWorker{jobsCompleted: 0, asleep: true})
-		tunnyWorkers[i] = extWorkers[i]
-	}
-
-	pool := CreateCustomPool(tunnyWorkers)
-
-	for j := 0; j < 1; j++ {
-		wg.Add(40)
-		_, err := pool.Open()
-
-		for i := range extWorkers {
-			if (*extWorkers[i]).asleep {
-				t.Errorf("Worker is still asleep!")
-			}
-		}
-
+	for i := 0; i < 1; i++ {
+		ret, err := pool.SendWork(10)
 		if err != nil {
-			t.Errorf("Error starting pool: ", err)
+			t.Errorf("Failed to send work: %v", err)
 			return
 		}
+		retInt := ret.(int)
+		if ret != 20 {
+			t.Errorf("Wrong return value: %v != %v", 20, retInt)
+		}
+	}
+}
 
-		for i := 0; i < 40; i++ {
-			/* Calling SendWork is thread safe, go ahead and call it from any goroutine.
-			 * The call will block until a worker is ready and has completed the job.
-			 */
+func TestParallelJobs(t *testing.T) {
+	nWorkers := 10
+
+	jobGroup := sync.WaitGroup{}
+	testGroup := sync.WaitGroup{}
+
+	pool, err := CreatePool(nWorkers, func(in interface{}) interface{} {
+		jobGroup.Done()
+		jobGroup.Wait()
+
+		intVal := in.(int)
+		return intVal * 2
+	}).Open()
+	if err != nil {
+		t.Errorf("Failed to create pool: %v", err)
+		return
+	}
+	defer pool.Close()
+
+	for j := 0; j < 1; j++ {
+		jobGroup.Add(nWorkers)
+		testGroup.Add(nWorkers)
+
+		for i := 0; i < nWorkers; i++ {
 			go func() {
-				if value, err := pool.SendWork("hello world"); err == nil {
-					if str, ok := value.(string); ok {
-						if str != "custom job done: hello world" {
-							t.Errorf("Unexpected output from custom worker")
-						}
-					} else {
-						t.Errorf("Not a string!")
-					}
-				} else {
-					t.Errorf("Error returned: ", err)
+				ret, err := pool.SendWork(10)
+				if err != nil {
+					t.Errorf("Failed to send work: %v", err)
+					return
 				}
-				wg.Done()
+				retInt := ret.(int)
+				if ret != 20 {
+					t.Errorf("Wrong return value: %v != %v", 20, retInt)
+				}
+
+				testGroup.Done()
 			}()
 		}
 
-		wg.Wait()
-
-		/* After this call we should be able to guarantee that no other go routine is
-		 * accessing the workers.
-		 */
-		pool.Close()
-
-		expectedJobs := ((j + 1) * 10)
-		for i := range extWorkers {
-			if (*extWorkers[i]).jobsCompleted != expectedJobs {
-				t.Errorf("Expected %v jobs completed, actually: %v",
-					expectedJobs,
-					(*extWorkers[i]).jobsCompleted,
-				)
-			}
-			if !(*extWorkers[i]).asleep {
-				t.Errorf("Worker is still awake!")
-			}
-		}
+		testGroup.Wait()
 	}
 }
 
-func TestAsyncCalls(t *testing.T) {
-	numWorkers, numData := 4, 400
-	wg := new(sync.WaitGroup)
-	wg.Add(numData)
+/*--------------------------------------------------------------------------------------------------
+ */
 
-	pool, err := CreatePool(numWorkers, func(data interface{}) interface{} {
-		if intData, ok := data.(int); ok {
-			time.Sleep(time.Millisecond * 5)
-			wg.Done()
-			return intData
-		}
-		t.Errorf("Not an int!")
-		return nil
-	}).Open()
+// Basic worker implementation
+type dummyWorker struct {
+	ready bool
+	t     *testing.T
+}
 
+func (d *dummyWorker) TunnyJob(in interface{}) interface{} {
+	if !d.ready {
+		d.t.Errorf("TunnyJob called without polling TunnyReady")
+	}
+	d.ready = false
+	return in
+}
+
+func (d *dummyWorker) TunnyReady() bool {
+	d.ready = true
+	return d.ready
+}
+
+// Test the pool with a basic worker implementation
+func TestDummyWorker(t *testing.T) {
+	pool, err := CreateCustomPool([]TunnyWorker{&dummyWorker{t: t}}).Open()
 	if err != nil {
-		t.Errorf("Error starting pool: ", err)
+		t.Errorf("Failed to create pool: %v", err)
 		return
 	}
+	defer pool.Close()
 
-	for i := 0; i < numData; i++ {
-		pool.SendWorkAsync(i, nil)
-	}
-
-	wg.Wait()
-
-	pool.Close()
-	pool.Open()
-
-	wg.Add(numData)
-
-	for i := 0; i < numData; i++ {
-		pool.SendWorkAsync(i, func(val interface{}, workErr error) {
-			if workErr != nil {
-				t.Errorf("Error: %v, ", workErr)
-			}
-			if _, ok := val.(int); !ok {
-				t.Errorf("Not and int!")
-			}
-		})
-	}
-
-	wg.Wait()
-
-	pool.Close()
-}
-
-type interruptableWorker struct {
-	stopChan chan int
-}
-
-func (worker *interruptableWorker) TunnyJob(data interface{}) interface{} {
-	select {
-	case <-time.After(100 * time.Millisecond):
-		return 25
-	case <-worker.stopChan:
-		return 50
-	}
-	return 25
-}
-
-func (worker *interruptableWorker) TunnyReady() bool {
-	return true
-}
-
-func (worker *interruptableWorker) TunnyInterrupt() {
-	worker.stopChan <- 1
-}
-
-func Test(t *testing.T) {
-	workers := make([]TunnyWorker, 1)
-	workers[0] = &interruptableWorker{make(chan int, 1)}
-
-	pool, poolErr := CreateCustomPool(workers).Open()
-
-	if poolErr != nil {
-		t.Errorf("Error starting pool: ", poolErr)
-		return
-	}
-
-	res, err := pool.SendWorkTimed(25, 50)
-	if err == nil || res == 25 {
-		t.Errorf("Interrupt not activated!")
-	}
-
-	pool.Close()
-}
-
-/*
-Tests whether a backlog of jobs will be performed in FIFO order.
-*/
-func TestQueueing(t *testing.T) {
-	numWorkers, numJobs := 1, 10
-
-	pool, poolErr := CreatePool(numWorkers, func(data interface{}) interface{} {
-		time.Sleep(50 * time.Millisecond)
-		return data
-	}).Open()
-
-	if poolErr != nil {
-		t.Errorf("Error starting pool: ", poolErr)
-		return
-	}
-
-	outChan := make(chan int)
-	inChan := make(chan int)
-
-	for i := 0; i < numJobs; i++ {
-		go func() {
-			val := <-inChan
-			result, _ := pool.SendWork(val)
-			outChan <- result.(int)
-		}()
-	}
-
-	for i := 0; i < numJobs; i++ {
-		inChan <- i
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	for i := 0; i < numJobs; i++ {
-		val := <-outChan
-		if val != i {
-			t.Errorf("Wrong value, expected %v, got %v", i, val)
+	for i := 0; i < 100; i++ {
+		if result, err := pool.SendWork(12); err != nil {
+			t.Errorf("Failed to send work: %v", err)
+		} else if resInt, ok := result.(int); !ok || resInt != 12 {
+			t.Errorf("Unexpected result from job: %v != %v", 12, result)
 		}
 	}
-
-	pool.Close()
 }
 
-/*
+// Extended worker implementation
+type dummyExtWorker struct {
+	dummyWorker
 
-Test template
+	initialized bool
+}
 
-func Test(t *testing.T) {
-	pool, poolErr := CreatePool(numWorkers, func(data interface{}) interface{} {
-	}).Open()
+func (d *dummyExtWorker) TunnyJob(in interface{}) interface{} {
+	if !d.initialized {
+		d.t.Errorf("TunnyJob called without calling TunnyInitialize")
+	}
+	return d.dummyWorker.TunnyJob(in)
+}
 
-	if poolErr != nil {
-		t.Errorf("Error starting pool: ", poolErr)
+func (d *dummyExtWorker) TunnyInitialize() {
+	d.initialized = true
+}
+
+func (d *dummyExtWorker) TunnyTerminate() {
+	if !d.initialized {
+		d.t.Errorf("TunnyTerminate called without calling TunnyInitialize")
+	}
+	d.initialized = false
+}
+
+// Test the pool with an extended worker implementation
+func TestDummyExtWorker(t *testing.T) {
+	pool, err := CreateCustomPool(
+		[]TunnyWorker{
+			&dummyExtWorker{
+				dummyWorker: dummyWorker{t: t},
+			},
+		}).Open()
+	if err != nil {
+		t.Errorf("Failed to create pool: %v", err)
 		return
 	}
+	defer pool.Close()
 
-	// TEST HERE
-
-	pool.Close()
+	for i := 0; i < 100; i++ {
+		if result, err := pool.SendWork(12); err != nil {
+			t.Errorf("Failed to send work: %v", err)
+		} else if resInt, ok := result.(int); !ok || resInt != 12 {
+			t.Errorf("Unexpected result from job: %v != %v", 12, result)
+		}
+	}
 }
-*/
+
+// Extended and interruptible worker implementation
+type dummyExtIntWorker struct {
+	dummyExtWorker
+
+	jobLock *sync.Mutex
+}
+
+func (d *dummyExtIntWorker) TunnyJob(in interface{}) interface{} {
+	d.jobLock.Lock()
+	d.jobLock.Unlock()
+
+	return d.dummyExtWorker.TunnyJob(in)
+}
+
+func (d *dummyExtIntWorker) TunnyReady() bool {
+	d.jobLock.Lock()
+
+	return d.dummyExtWorker.TunnyReady()
+}
+
+func (d *dummyExtIntWorker) TunnyInterrupt() {
+	d.jobLock.Unlock()
+}
+
+// Test the pool with an extended and interruptible worker implementation
+func TestDummyExtIntWorker(t *testing.T) {
+	pool, err := CreateCustomPool(
+		[]TunnyWorker{
+			&dummyExtIntWorker{
+				dummyExtWorker: dummyExtWorker{
+					dummyWorker: dummyWorker{t: t},
+				},
+				jobLock: &sync.Mutex{},
+			},
+		}).Open()
+	if err != nil {
+		t.Errorf("Failed to create pool: %v", err)
+		return
+	}
+	defer pool.Close()
+
+	for i := 0; i < 100; i++ {
+		if _, err := pool.SendWorkTimed(1, nil); err == nil {
+			t.Errorf("Expected timeout from dummyExtIntWorker.")
+		}
+	}
+}
+
+/*--------------------------------------------------------------------------------------------------
+ */
