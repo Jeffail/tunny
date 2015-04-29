@@ -31,6 +31,15 @@ import (
 	"time"
 )
 
+// Errors that are used throughout the Tunny API.
+var (
+	ErrPoolAlreadyRunning = errors.New("the pool is already running")
+	ErrPoolNotRunning     = errors.New("the pool is not running")
+	ErrJobNotFunc         = errors.New("generic worker not given a func()")
+	ErrWorkerClosed       = errors.New("worker was closed")
+	ErrJobTimedOut        = errors.New("job request timed out")
+)
+
 /*
 TunnyWorker - The basic interface of a tunny worker.
 */
@@ -135,7 +144,7 @@ func (pool *WorkPool) Open() (*WorkPool, error) {
 		return pool, nil
 
 	}
-	return nil, errors.New("pool is already running")
+	return nil, ErrPoolAlreadyRunning
 }
 
 /*
@@ -155,7 +164,7 @@ func (pool *WorkPool) Close() error {
 		pool.setRunning(false)
 		return nil
 	}
-	return errors.New("cannot close when the pool is not running")
+	return ErrPoolNotRunning
 }
 
 /*
@@ -187,7 +196,7 @@ func CreatePoolGeneric(numWorkers int) *WorkPool {
 			method()
 			return nil
 		}
-		return errors.New("generic worker not given a func()")
+		return ErrJobNotFunc
 	})
 
 }
@@ -231,6 +240,7 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 		// Wait for workers, or time out
 		if chosen, _, ok := reflect.Select(selectCases); ok {
 
+			// Check if the selected index is a worker, otherwise we timed out
 			if chosen < (len(selectCases) - 1) {
 				pool.workers[chosen].jobChan <- jobData
 
@@ -238,7 +248,7 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 				select {
 				case data, open := <-pool.workers[chosen].outputChan:
 					if !open {
-						return nil, errors.New("worker was closed before reaching a result")
+						return nil, ErrWorkerClosed
 					}
 					return data, nil
 				case <-time.After((milliTimeout * time.Millisecond) - time.Since(before)):
@@ -250,16 +260,17 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 						pool.workers[chosen].Interrupt()
 						<-pool.workers[chosen].outputChan
 					}()
-					return nil, errors.New("request timed out whilst waiting for job to complete")
+					return nil, ErrJobTimedOut
 				}
 			} else {
-				return nil, errors.New("request timed out whilst waiting for a worker")
+				return nil, ErrJobTimedOut
 			}
 		} else {
-			return nil, errors.New("failed to find a worker")
+			// This means the chosen channel was closed
+			return nil, ErrWorkerClosed
 		}
 	} else {
-		return nil, errors.New("pool is not running! Call Open() before sending work")
+		return nil, ErrPoolNotRunning
 	}
 }
 
@@ -294,13 +305,13 @@ func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
 			result, open := <-pool.workers[chosen].outputChan
 
 			if !open {
-				return nil, errors.New("worker was closed before reaching a result")
+				return nil, ErrWorkerClosed
 			}
 			return result, nil
 		}
-		return nil, errors.New("failed to find or wait for a worker")
+		return nil, ErrWorkerClosed
 	}
-	return nil, errors.New("pool is not running! Call Open() before sending work")
+	return nil, ErrPoolNotRunning
 }
 
 /*
