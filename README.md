@@ -2,7 +2,7 @@
 
 Tunny is a Golang library for spawning and managing a goroutine pool.
 
-The API is synchronous and simple to use. Jobs are unallocated to a worker until one becomes available.
+The API is synchronous and simple to use. Jobs are allocated to a worker when one becomes available.
 
 https://godoc.org/github.com/Jeffail/tunny
 
