@@ -25,7 +25,9 @@ package tunny
 
 import (
 	"errors"
+	"expvar"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -340,6 +342,30 @@ func (pool *WorkPool) NumPendingAsyncJobs() int32 {
 	return atomic.LoadInt32(&pool.pendingAsyncJobs)
 }
 
+/*
+NumWorkers - Number of workers in the pool
+*/
 func (pool *WorkPool) NumWorkers() int {
 	return len(pool.workers)
+}
+
+type liveVarAccessor func() string
+
+func (a liveVarAccessor) String() string {
+	return a()
+}
+
+/*
+Publishes the NumWorkers and NumPendingAsyncJobs to expvars
+*/
+func (pool *WorkPool) PublishExpvarMetrics(poolName string) {
+	ret := expvar.NewMap(poolName)
+	asyncJobsFn := func() string {
+		return strconv.FormatInt(int64(pool.NumPendingAsyncJobs()), 10)
+	}
+	numWorkersFn := func() string {
+		return strconv.FormatInt(int64(pool.NumWorkers()), 10)
+	}
+	ret.Set("pendingAsyncJobs", liveVarAccessor(asyncJobsFn))
+	ret.Set("numWorkers", liveVarAccessor(numWorkersFn))
 }
