@@ -25,7 +25,9 @@ package tunny
 
 import (
 	"errors"
+	"expvar"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -102,10 +104,11 @@ You may open and close a pool as many times as you wish, calling close is a bloc
 guarantees all goroutines are stopped.
 */
 type WorkPool struct {
-	workers     []*workerWrapper
-	selects     []reflect.SelectCase
-	statusMutex sync.RWMutex
-	running     uint32
+	workers          []*workerWrapper
+	selects          []reflect.SelectCase
+	statusMutex      sync.RWMutex
+	running          uint32
+	pendingAsyncJobs int32
 }
 
 func (pool *WorkPool) isRunning() bool {
@@ -284,7 +287,9 @@ func (pool *WorkPool) SendWorkTimedAsync(
 	jobData interface{},
 	after func(interface{}, error),
 ) {
+	atomic.AddInt32(&pool.pendingAsyncJobs, 1)
 	go func() {
+		defer atomic.AddInt32(&pool.pendingAsyncJobs, -1)
 		result, err := pool.SendWorkTimed(milliTimeout, jobData)
 		if after != nil {
 			after(result, err)
@@ -320,10 +325,47 @@ result to a receiving closure. You may set the closure to nil if no further acti
 are required.
 */
 func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
+	atomic.AddInt32(&pool.pendingAsyncJobs, 1)
 	go func() {
+		defer atomic.AddInt32(&pool.pendingAsyncJobs, -1)
 		result, err := pool.SendWork(jobData)
 		if after != nil {
 			after(result, err)
 		}
 	}()
+}
+
+/*
+NumPendingAsyncJobs - Get the current count of async jobs either in flight, or waiting for a worker
+*/
+func (pool *WorkPool) NumPendingAsyncJobs() int32 {
+	return atomic.LoadInt32(&pool.pendingAsyncJobs)
+}
+
+/*
+NumWorkers - Number of workers in the pool
+*/
+func (pool *WorkPool) NumWorkers() int {
+	return len(pool.workers)
+}
+
+type liveVarAccessor func() string
+
+func (a liveVarAccessor) String() string {
+	return a()
+}
+
+/*
+PublishExpvarMetrics - Publishes the NumWorkers and NumPendingAsyncJobs to expvars
+*/
+func (pool *WorkPool) PublishExpvarMetrics(poolName string) {
+	ret := expvar.NewMap(poolName)
+	asyncJobsFn := func() string {
+		return strconv.FormatInt(int64(pool.NumPendingAsyncJobs()), 10)
+	}
+	numWorkersFn := func() string {
+		return strconv.FormatInt(int64(pool.NumWorkers()), 10)
+	}
+	ret.Set("pendingAsyncJobs", liveVarAccessor(asyncJobsFn))
+	ret.Set("numWorkers", liveVarAccessor(numWorkersFn))
 }

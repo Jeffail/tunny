@@ -25,6 +25,7 @@ package tunny
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 /*--------------------------------------------------------------------------------------------------
@@ -230,6 +231,54 @@ func TestDummyExtIntWorker(t *testing.T) {
 		if _, err := pool.SendWorkTimed(1, nil); err == nil {
 			t.Errorf("Expected timeout from dummyExtIntWorker.")
 		}
+	}
+}
+
+func TestNumWorkers(t *testing.T) {
+	numWorkers := 10
+	pool, err := CreatePoolGeneric(numWorkers).Open()
+	if err != nil {
+		t.Errorf("Failed to create pool: %v", err)
+		return
+	}
+	defer pool.Close()
+	actual := pool.NumWorkers()
+	if actual != numWorkers {
+		t.Errorf("Expected to get %d workers, but got %d", numWorkers, actual)
+	}
+}
+
+var waitHalfSecond = func() {
+	time.Sleep(500 * time.Millisecond)
+}
+
+func TestNumPendingReportsAllWorkersWithNoWork(t *testing.T) {
+	numWorkers := 10
+	pool, err := CreatePoolGeneric(numWorkers).Open()
+	if err != nil {
+		t.Errorf("Failed to create pool: %v", err)
+		return
+	}
+	defer pool.Close()
+	actual := pool.NumPendingAsyncJobs()
+	if actual != 0 {
+		t.Errorf("Expected to get 0 pending jobs when pool is quiet, but got %d", actual)
+	}
+}
+
+func TestNumPendingReportsNotAllWorkersWhenSomeBusy(t *testing.T) {
+	numWorkers := 10
+	pool, err := CreatePoolGeneric(numWorkers).Open()
+	if err != nil {
+		t.Errorf("Failed to create pool: %v", err)
+		return
+	}
+	defer pool.Close()
+	pool.SendWorkAsync(waitHalfSecond, nil)
+	actual := pool.NumPendingAsyncJobs()
+	expected := int32(1)
+	if actual != expected {
+		t.Errorf("Expected to get %d pending jobs when pool has work, but got %d", expected, actual)
 	}
 }
 
