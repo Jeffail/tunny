@@ -262,7 +262,7 @@ func TestNumPendingReportsAllWorkersWithNoWork(t *testing.T) {
 	defer pool.Close()
 	actual := pool.NumPendingAsyncJobs()
 	if actual != 0 {
-		t.Errorf("Expected to get 0 pending jobs when pool is quiet, but got %d", numWorkers, actual)
+		t.Errorf("Expected to get 0 pending jobs when pool is quiet, but got %d", actual)
 	}
 }
 

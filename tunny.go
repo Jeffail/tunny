@@ -356,7 +356,7 @@ func (a liveVarAccessor) String() string {
 }
 
 /*
-Publishes the NumWorkers and NumPendingAsyncJobs to expvars
+PublishExpvarMetrics - Publishes the NumWorkers and NumPendingAsyncJobs to expvars
 */
 func (pool *WorkPool) PublishExpvarMetrics(poolName string) {
 	ret := expvar.NewMap(poolName)
