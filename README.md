@@ -29,7 +29,7 @@ import (
 
 func main() {
 	numCPUs := runtime.NumCPU()
-	runtime.GOMAXPROCS(numCPUs)
+	runtime.GOMAXPROCS(numCPUs+1) // numCPUs hot threads + one for async tasks.
 
 	pool, _ := tunny.CreatePool(numCPUs, func(object interface{}) interface{} {
 		input, _ := object.([]byte)
