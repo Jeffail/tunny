@@ -53,7 +53,8 @@ type TunnyWorker interface {
 	// Called after each job, this indicates whether the worker is ready for the next job.
 	// The default implementation is to return true always. If false is returned then the
 	// method is called every five milliseconds until either true is returned or the pool
-	// is closed.
+	// is closed. For efficiency you should have this call block until your worker is ready,
+	// otherwise you introduce a 5ms latency between jobs.
 	TunnyReady() bool
 }
 
