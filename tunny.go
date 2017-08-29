@@ -91,12 +91,11 @@ You may open and close a pool as many times as you wish, calling close is a bloc
 guarantees all goroutines are stopped.
 */
 type WorkPool struct {
-	workers          []*workerWrapper
-	selects          []reflect.SelectCase
-	statusMutex      sync.RWMutex
-	waiter           sync.WaitGroup
-	running          uint32
-	pendingAsyncJobs int32
+	workers     []*workerWrapper
+	selects     []reflect.SelectCase
+	statusMutex sync.RWMutex
+	waiter      sync.WaitGroup
+	running     uint32
 }
 
 func (pool *WorkPool) isRunning() bool {
@@ -144,7 +143,7 @@ func (pool *WorkPool) Wait() {
 /*
 Close all channels and goroutines managed by the pool.
 */
-func (pool *WorkPool) Close() (err error) {
+func (pool *WorkPool) Close() error {
 	pool.statusMutex.Lock()
 	defer pool.statusMutex.Unlock()
 
@@ -370,13 +369,6 @@ func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{},
 }
 
 /*
-NumPendingAsyncJobs - Get the current count of async jobs either in flight, or waiting for a worker
-*/
-func (pool *WorkPool) NumPendingAsyncJobs() int32 {
-	return atomic.LoadInt32(&pool.pendingAsyncJobs)
-}
-
-/*
 NumWorkers - Number of workers in the pool
 */
 func (pool *WorkPool) NumWorkers() int {
@@ -394,12 +386,8 @@ PublishExpvarMetrics - Publishes the NumWorkers and NumPendingAsyncJobs to expva
 */
 func (pool *WorkPool) PublishExpvarMetrics(poolName string) {
 	ret := expvar.NewMap(poolName)
-	asyncJobsFn := func() string {
-		return strconv.FormatInt(int64(pool.NumPendingAsyncJobs()), 10)
-	}
 	numWorkersFn := func() string {
 		return strconv.FormatInt(int64(pool.NumWorkers()), 10)
 	}
-	ret.Set("pendingAsyncJobs", liveVarAccessor(asyncJobsFn))
 	ret.Set("numWorkers", liveVarAccessor(numWorkersFn))
 }
