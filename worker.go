@@ -24,11 +24,10 @@ package tunny
 
 import (
 	"sync/atomic"
-	"time"
 )
 
 type workerWrapper struct {
-	readyChan  chan int
+	readyChan  chan int8
 	jobChan    chan interface{}
 	outputChan chan interface{}
 	poolOpen   uint32
@@ -36,34 +35,18 @@ type workerWrapper struct {
 }
 
 func (wrapper *workerWrapper) Loop() {
-
-	// TODO: Configure?
-	tout := time.Duration(5)
-
-	for !wrapper.worker.TunnyReady() {
-		// It's sad that we can't simply check if jobChan is closed here.
-		if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
-			break
-		}
-		time.Sleep(tout * time.Millisecond)
-	}
-
 	wrapper.readyChan <- 1
 
 	for data := range wrapper.jobChan {
-		wrapper.outputChan <- wrapper.worker.TunnyJob(data)
-		for !wrapper.worker.TunnyReady() {
-			if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
-				break
-			}
-			time.Sleep(tout * time.Millisecond)
+		if atomic.LoadUint32(&wrapper.poolOpen) == 0 {
+			break
 		}
+		wrapper.outputChan <- wrapper.worker.TunnyJob(data)
 		wrapper.readyChan <- 1
 	}
 
 	close(wrapper.readyChan)
 	close(wrapper.outputChan)
-
 }
 
 func (wrapper *workerWrapper) Open() {
@@ -71,7 +54,7 @@ func (wrapper *workerWrapper) Open() {
 		extWorker.TunnyInitialize()
 	}
 
-	wrapper.readyChan = make(chan int)
+	wrapper.readyChan = make(chan int8)
 	wrapper.jobChan = make(chan interface{})
 	wrapper.outputChan = make(chan interface{})
 
