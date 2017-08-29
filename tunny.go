@@ -172,6 +172,18 @@ func (pool *WorkPool) Close() error {
 }
 
 /*
+Close all channels and goroutines after specified time.
+*/
+func (pool *WorkPool) CloseTimed(milliseconds time.Duration) error {
+	if pool.isRunning() {
+		<-time.After(time.Millisecond * milliseconds)
+		return pool.Close()
+	}
+
+	return ErrPoolNotRunning
+}
+
+/*
 CreatePool - Creates a pool of workers, and takes a closure argument which is the action
 to perform for each job.
 */
