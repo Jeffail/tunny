@@ -235,10 +235,14 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 	if pool.isRunning() {
 		before := time.Now()
 
+		// Create a new time out timer
+		timeout := time.NewTimer(milliTimeout * time.Millisecond)
+		defer timeout.Stop()
+
 		// Create new selectcase[] and add time out case
 		selectCases := append(pool.selects[:], reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(time.After(milliTimeout * time.Millisecond)),
+			Chan: reflect.ValueOf(timeout.C),
 		})
 
 		// Wait for workers, or time out
@@ -248,6 +252,9 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 			if chosen < (len(selectCases) - 1) {
 				pool.workers[chosen].jobChan <- jobData
 
+				timeoutRemain := time.NewTimer((milliTimeout * time.Millisecond) - time.Since(before))
+				defer timeoutRemain.Stop()
+
 				// Wait for response, or time out
 				select {
 				case data, open := <-pool.workers[chosen].outputChan:
@@ -255,7 +262,7 @@ func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interfac
 						return nil, ErrWorkerClosed
 					}
 					return data, nil
-				case <-time.After((milliTimeout * time.Millisecond) - time.Since(before)):
+				case <-timeoutRemain.C:
 					/* If we time out here we also need to ensure that the output is still
 					 * collected and that the worker can move on. Therefore, we fork the
 					 * waiting process into a new goroutine.
