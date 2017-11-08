@@ -46,16 +46,8 @@ var (
 TunnyWorker - The basic interface of a tunny worker.
 */
 type TunnyWorker interface {
-
 	// Called for each job, expects the result to be returned synchronously
 	TunnyJob(interface{}) interface{}
-
-	// Called after each job, this indicates whether the worker is ready for the next job.
-	// The default implementation is to return true always. If false is returned then the
-	// method is called every five milliseconds until either true is returned or the pool
-	// is closed. For efficiency you should have this call block until your worker is ready,
-	// otherwise you introduce a 5ms latency between jobs.
-	TunnyReady() bool
 }
 
 /*
@@ -63,7 +55,6 @@ TunnyExtendedWorker - An optional interface that can be implemented if the worke
 more control over its state.
 */
 type TunnyExtendedWorker interface {
-
 	// Called when the pool is opened, this will be called before any jobs are sent.
 	TunnyInitialize()
 
@@ -76,7 +67,6 @@ TunnyInterruptable - An optional interface that can be implemented in order to a
 worker to drop jobs when they are abandoned.
 */
 type TunnyInterruptable interface {
-
 	// Called when the current job has been abandoned by the client.
 	TunnyInterrupt()
 }
@@ -93,10 +83,6 @@ func (worker *tunnyDefaultWorker) TunnyJob(data interface{}) interface{} {
 	return (*worker.job)(data)
 }
 
-func (worker *tunnyDefaultWorker) TunnyReady() bool {
-	return true
-}
-
 /*
 WorkPool contains the structures and methods required to communicate with your pool, it must
 be opened before sending work and closed when all jobs are completed.
@@ -105,11 +91,11 @@ You may open and close a pool as many times as you wish, calling close is a bloc
 guarantees all goroutines are stopped.
 */
 type WorkPool struct {
-	workers          []*workerWrapper
-	selects          []reflect.SelectCase
-	statusMutex      sync.RWMutex
-	running          uint32
-	pendingAsyncJobs int32
+	workers     []*workerWrapper
+	selects     []reflect.SelectCase
+	statusMutex sync.RWMutex
+	waiter      sync.WaitGroup
+	running     uint32
 }
 
 func (pool *WorkPool) isRunning() bool {
@@ -132,7 +118,6 @@ func (pool *WorkPool) Open() (*WorkPool, error) {
 	defer pool.statusMutex.Unlock()
 
 	if !pool.isRunning() {
-
 		pool.selects = make([]reflect.SelectCase, len(pool.workers))
 
 		for i, workerWrapper := range pool.workers {
@@ -146,9 +131,13 @@ func (pool *WorkPool) Open() (*WorkPool, error) {
 
 		pool.setRunning(true)
 		return pool, nil
-
 	}
+
 	return nil, ErrPoolAlreadyRunning
+}
+
+func (pool *WorkPool) Wait() {
+	pool.waiter.Wait()
 }
 
 /*
@@ -166,6 +155,50 @@ func (pool *WorkPool) Close() error {
 			workerWrapper.Join()
 		}
 		pool.setRunning(false)
+		return nil
+	}
+	return ErrPoolNotRunning
+}
+
+func (pool *WorkPool) WaitAndClose() error {
+	pool.Wait()
+	return pool.Close()
+}
+
+/*
+Close all channels and goroutines after specified time.
+*/
+func (pool *WorkPool) WaitAndCloseTimed(milliseconds time.Duration) error {
+	// Locking pool status
+	pool.statusMutex.Lock()
+	defer pool.statusMutex.Unlock()
+
+	if pool.isRunning() {
+		// Waiting workers
+		waitDone := make(chan bool)
+		go func() {
+			pool.waiter.Wait()
+			waitDone <- true
+		}()
+		func() {
+			for {
+				select {
+				case <-time.After(time.Millisecond * milliseconds):
+					return
+				case <-waitDone:
+					return
+				}
+			}
+		}()
+
+		for _, workerWrapper := range pool.workers {
+			workerWrapper.Close()
+		}
+		for _, workerWrapper := range pool.workers {
+			workerWrapper.Join()
+		}
+		pool.setRunning(false)
+
 		return nil
 	}
 	return ErrPoolNotRunning
@@ -194,7 +227,6 @@ CreatePoolGeneric - Creates a pool of generic workers. When sending work to a po
 generic workers you send a closure (func()) which is the job to perform.
 */
 func CreatePoolGeneric(numWorkers int) *WorkPool {
-
 	return CreatePool(numWorkers, func(jobCall interface{}) interface{} {
 		if method, ok := jobCall.(func()); ok {
 			method()
@@ -295,9 +327,9 @@ func (pool *WorkPool) SendWorkTimedAsync(
 	jobData interface{},
 	after func(interface{}, error),
 ) {
-	atomic.AddInt32(&pool.pendingAsyncJobs, 1)
+	pool.waiter.Add(1)
 	go func() {
-		defer atomic.AddInt32(&pool.pendingAsyncJobs, -1)
+		defer pool.waiter.Add(-1)
 		result, err := pool.SendWorkTimed(milliTimeout, jobData)
 		if after != nil {
 			after(result, err)
@@ -333,21 +365,14 @@ result to a receiving closure. You may set the closure to nil if no further acti
 are required.
 */
 func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
-	atomic.AddInt32(&pool.pendingAsyncJobs, 1)
+	pool.waiter.Add(1)
 	go func() {
-		defer atomic.AddInt32(&pool.pendingAsyncJobs, -1)
+		defer pool.waiter.Add(-1)
 		result, err := pool.SendWork(jobData)
 		if after != nil {
 			after(result, err)
 		}
 	}()
-}
-
-/*
-NumPendingAsyncJobs - Get the current count of async jobs either in flight, or waiting for a worker
-*/
-func (pool *WorkPool) NumPendingAsyncJobs() int32 {
-	return atomic.LoadInt32(&pool.pendingAsyncJobs)
 }
 
 /*
@@ -368,12 +393,8 @@ PublishExpvarMetrics - Publishes the NumWorkers and NumPendingAsyncJobs to expva
 */
 func (pool *WorkPool) PublishExpvarMetrics(poolName string) {
 	ret := expvar.NewMap(poolName)
-	asyncJobsFn := func() string {
-		return strconv.FormatInt(int64(pool.NumPendingAsyncJobs()), 10)
-	}
 	numWorkersFn := func() string {
 		return strconv.FormatInt(int64(pool.NumWorkers()), 10)
 	}
-	ret.Set("pendingAsyncJobs", liveVarAccessor(asyncJobsFn))
 	ret.Set("numWorkers", liveVarAccessor(numWorkersFn))
 }
