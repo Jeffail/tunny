@@ -1,379 +1,253 @@
-/*
-Copyright (c) 2014 Ashley Jeffs
+// Copyright (c) 2014 Ashley Jeffs
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
-
-// Package tunny implements a simple pool for maintaining independant worker goroutines.
 package tunny
 
 import (
 	"errors"
-	"expvar"
-	"reflect"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
+//------------------------------------------------------------------------------
+
 // Errors that are used throughout the Tunny API.
 var (
-	ErrPoolAlreadyRunning = errors.New("the pool is already running")
-	ErrPoolNotRunning     = errors.New("the pool is not running")
-	ErrJobNotFunc         = errors.New("generic worker not given a func()")
-	ErrWorkerClosed       = errors.New("worker was closed")
-	ErrJobTimedOut        = errors.New("job request timed out")
+	ErrPoolNotRunning = errors.New("the pool is not running")
+	ErrJobNotFunc     = errors.New("generic worker not given a func()")
+	ErrWorkerClosed   = errors.New("worker was closed")
+	ErrJobTimedOut    = errors.New("job request timed out")
 )
 
-/*
-TunnyWorker - The basic interface of a tunny worker.
-*/
-type TunnyWorker interface {
+// Worker is an interface representing a Tunny working agent. It will be used to
+// block a calling goroutine until ready to process a job, process that job
+// synchronously, interrupt its own process call when jobs are abandoned, and
+// clean up its resources when being removed from the pool.
+//
+// Each of these duties are implemented as a single method and can be averted
+// when not needed by simply implementing an empty func.
+type Worker interface {
+	// Process will synchronously perform a job and return the result.
+	Process(interface{}) interface{}
 
-	// Called for each job, expects the result to be returned synchronously
-	TunnyJob(interface{}) interface{}
+	// BlockUntilReady is called before each job is processed and must block the
+	// calling goroutine until the Worker is ready to process the next job.
+	BlockUntilReady()
 
-	// Called after each job, this indicates whether the worker is ready for the next job.
-	// The default implementation is to return true always. If false is returned then the
-	// method is called every five milliseconds until either true is returned or the pool
-	// is closed. For efficiency you should have this call block until your worker is ready,
-	// otherwise you introduce a 5ms latency between jobs.
-	TunnyReady() bool
+	// Interrupt is called when a job is cancelled. The worker is responsible
+	// for unblocking the Process implementation.
+	Interrupt()
+
+	// Terminate is called when a Worker is removed from the processing pool
+	// and is responsible for cleaning up any held resources.
+	Terminate()
 }
 
-/*
-TunnyExtendedWorker - An optional interface that can be implemented if the worker needs
-more control over its state.
-*/
-type TunnyExtendedWorker interface {
+//------------------------------------------------------------------------------
 
-	// Called when the pool is opened, this will be called before any jobs are sent.
-	TunnyInitialize()
-
-	// Called when the pool is closed, this will be called after all jobs are completed.
-	TunnyTerminate()
+// closureWorker is a minimal Worker implementation that simply wraps a
+// func(interface{}) interface{}
+type closureWorker struct {
+	processor func(interface{}) interface{}
 }
 
-/*
-TunnyInterruptable - An optional interface that can be implemented in order to allow the
-worker to drop jobs when they are abandoned.
-*/
-type TunnyInterruptable interface {
-
-	// Called when the current job has been abandoned by the client.
-	TunnyInterrupt()
+func (w *closureWorker) Process(payload interface{}) interface{} {
+	return w.processor(payload)
 }
 
-/*
-Default and very basic implementation of a tunny worker. This worker holds a closure which
-is assigned at construction, and this closure is called on each job.
-*/
-type tunnyDefaultWorker struct {
-	job *func(interface{}) interface{}
-}
+func (w *closureWorker) BlockUntilReady() {}
+func (w *closureWorker) Interrupt()       {}
+func (w *closureWorker) Terminate()       {}
 
-func (worker *tunnyDefaultWorker) TunnyJob(data interface{}) interface{} {
-	return (*worker.job)(data)
-}
+//------------------------------------------------------------------------------
 
-func (worker *tunnyDefaultWorker) TunnyReady() bool {
-	return true
-}
+// callbackWorker is a minimal Worker implementation that attempts to cast
+// each job into func() and either calls it if successful or returns
+// ErrJobNotFunc.
+type callbackWorker struct{}
 
-/*
-WorkPool contains the structures and methods required to communicate with your pool, it must
-be opened before sending work and closed when all jobs are completed.
-
-You may open and close a pool as many times as you wish, calling close is a blocking call that
-guarantees all goroutines are stopped.
-*/
-type WorkPool struct {
-	workers          []*workerWrapper
-	selects          []reflect.SelectCase
-	statusMutex      sync.RWMutex
-	running          uint32
-	pendingAsyncJobs int32
-}
-
-func (pool *WorkPool) isRunning() bool {
-	return (atomic.LoadUint32(&pool.running) == 1)
-}
-
-func (pool *WorkPool) setRunning(running bool) {
-	if running {
-		atomic.SwapUint32(&pool.running, 1)
-	} else {
-		atomic.SwapUint32(&pool.running, 0)
-	}
-}
-
-/*
-Open all channels and launch the background goroutines managed by the pool.
-*/
-func (pool *WorkPool) Open() (*WorkPool, error) {
-	pool.statusMutex.Lock()
-	defer pool.statusMutex.Unlock()
-
-	if !pool.isRunning() {
-
-		pool.selects = make([]reflect.SelectCase, len(pool.workers))
-
-		for i, workerWrapper := range pool.workers {
-			workerWrapper.Open()
-
-			pool.selects[i] = reflect.SelectCase{
-				Dir:  reflect.SelectRecv,
-				Chan: reflect.ValueOf(workerWrapper.readyChan),
-			}
-		}
-
-		pool.setRunning(true)
-		return pool, nil
-
-	}
-	return nil, ErrPoolAlreadyRunning
-}
-
-/*
-Close all channels and goroutines managed by the pool.
-*/
-func (pool *WorkPool) Close() error {
-	pool.statusMutex.Lock()
-	defer pool.statusMutex.Unlock()
-
-	if pool.isRunning() {
-		for _, workerWrapper := range pool.workers {
-			workerWrapper.Close()
-		}
-		for _, workerWrapper := range pool.workers {
-			workerWrapper.Join()
-		}
-		pool.setRunning(false)
-		return nil
-	}
-	return ErrPoolNotRunning
-}
-
-/*
-CreatePool - Creates a pool of workers, and takes a closure argument which is the action
-to perform for each job.
-*/
-func CreatePool(numWorkers int, job func(interface{}) interface{}) *WorkPool {
-	pool := WorkPool{running: 0}
-
-	pool.workers = make([]*workerWrapper, numWorkers)
-	for i := range pool.workers {
-		newWorker := workerWrapper{
-			worker: &(tunnyDefaultWorker{&job}),
-		}
-		pool.workers[i] = &newWorker
-	}
-
-	return &pool
-}
-
-/*
-CreatePoolGeneric - Creates a pool of generic workers. When sending work to a pool of
-generic workers you send a closure (func()) which is the job to perform.
-*/
-func CreatePoolGeneric(numWorkers int) *WorkPool {
-
-	return CreatePool(numWorkers, func(jobCall interface{}) interface{} {
-		if method, ok := jobCall.(func()); ok {
-			method()
-			return nil
-		}
+func (w *callbackWorker) Process(payload interface{}) interface{} {
+	f, ok := payload.(func())
+	if !ok {
 		return ErrJobNotFunc
-	})
-
+	}
+	f()
+	return nil
 }
 
-/*
-CreateCustomPool - Creates a pool for an array of custom workers. The custom workers
-must implement TunnyWorker, and may also optionally implement TunnyExtendedWorker and
-TunnyInterruptable.
-*/
-func CreateCustomPool(customWorkers []TunnyWorker) *WorkPool {
-	pool := WorkPool{running: 0}
+func (w *callbackWorker) BlockUntilReady() {}
+func (w *callbackWorker) Interrupt()       {}
+func (w *callbackWorker) Terminate()       {}
 
-	pool.workers = make([]*workerWrapper, len(customWorkers))
-	for i := range pool.workers {
-		newWorker := workerWrapper{
-			worker: customWorkers[i],
+//------------------------------------------------------------------------------
+
+// Pool is a struct that manages a collection of workers, each with their own
+// goroutine. The Pool can initialize, expand, compress and close the workers,
+// as well as processing jobs with the workers synchronously.
+type Pool struct {
+	ctor    func() Worker
+	workers []*workerWrapper
+	reqChan chan workRequest
+
+	workerMut sync.Mutex
+}
+
+// New creates a new Pool of workers that starts with n workers. You must
+// provide a constructor function that creates new Worker types and when you
+// change the size of the pool the constructor will be called to create each new
+// Worker.
+func New(n int, ctor func() Worker) *Pool {
+	p := &Pool{
+		ctor:    ctor,
+		reqChan: make(chan workRequest),
+	}
+	p.SetSize(n)
+
+	return p
+}
+
+// NewFunc creates a new Pool of workers where each worker will process using
+// the provided func.
+func NewFunc(n int, f func(interface{}) interface{}) *Pool {
+	return New(n, func() Worker {
+		return &closureWorker{
+			processor: f,
 		}
-		pool.workers[i] = &newWorker
+	})
+}
+
+// NewCallback creates a new Pool of workers where workers cast the job payload
+// into a func() and runs it, or returns ErrNotFunc if the cast failed.
+func NewCallback(n int) *Pool {
+	return New(n, func() Worker {
+		return &callbackWorker{}
+	})
+}
+
+//------------------------------------------------------------------------------
+
+// Process will use the Pool to process a payload and synchronously return the
+// result. Process can be called safely by any goroutines, but will panic if the
+// Pool has been stopped.
+func (p *Pool) Process(payload interface{}) interface{} {
+	request, open := <-p.reqChan
+	if !open {
+		panic(ErrPoolNotRunning)
 	}
 
-	return &pool
+	request.jobChan <- payload
+
+	payload, open = <-request.retChan
+	if !open {
+		panic(ErrWorkerClosed)
+	}
+
+	return payload
 }
 
-/*
-SendWorkTimed - Send a job to a worker and return the result, this is a synchronous
-call with a timeout.
-*/
-func (pool *WorkPool) SendWorkTimed(milliTimeout time.Duration, jobData interface{}) (interface{}, error) {
-	pool.statusMutex.RLock()
-	defer pool.statusMutex.RUnlock()
+// ProcessTimed will use the Pool to process a payload and synchronously return
+// the result. If the timeout occurs before the job has finished the worker will
+// be interrupted and ErrJobTimedOut will be returned. ProcessTimed can be
+// called safely by any goroutines.
+func (p *Pool) ProcessTimed(
+	payload interface{},
+	timeout time.Duration,
+) (interface{}, error) {
+	tout := time.NewTimer(timeout)
 
-	if pool.isRunning() {
-		before := time.Now()
+	var request workRequest
+	var open bool
 
-		// Create a new time out timer
-		timeout := time.NewTimer(milliTimeout * time.Millisecond)
-		defer timeout.Stop()
+	select {
+	case request, open = <-p.reqChan:
+		if !open {
+			return nil, ErrPoolNotRunning
+		}
+	case <-tout.C:
+		return nil, ErrJobTimedOut
+	}
 
-		// Create new selectcase[] and add time out case
-		selectCases := append(pool.selects[:], reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(timeout.C),
-		})
+	select {
+	case request.jobChan <- payload:
+	case <-tout.C:
+		request.interruptFunc()
+		return nil, ErrJobTimedOut
+	}
 
-		// Wait for workers, or time out
-		if chosen, _, ok := reflect.Select(selectCases); ok {
-
-			// Check if the selected index is a worker, otherwise we timed out
-			if chosen < (len(selectCases) - 1) {
-				pool.workers[chosen].jobChan <- jobData
-
-				timeoutRemain := time.NewTimer((milliTimeout * time.Millisecond) - time.Since(before))
-				defer timeoutRemain.Stop()
-
-				// Wait for response, or time out
-				select {
-				case data, open := <-pool.workers[chosen].outputChan:
-					if !open {
-						return nil, ErrWorkerClosed
-					}
-					return data, nil
-				case <-timeoutRemain.C:
-					/* If we time out here we also need to ensure that the output is still
-					 * collected and that the worker can move on. Therefore, we fork the
-					 * waiting process into a new goroutine.
-					 */
-					go func() {
-						pool.workers[chosen].Interrupt()
-						<-pool.workers[chosen].outputChan
-					}()
-					return nil, ErrJobTimedOut
-				}
-			} else {
-				return nil, ErrJobTimedOut
-			}
-		} else {
-			// This means the chosen channel was closed
+	select {
+	case payload, open = <-request.retChan:
+		if !open {
 			return nil, ErrWorkerClosed
 		}
-	} else {
-		return nil, ErrPoolNotRunning
+	case <-tout.C:
+		request.interruptFunc()
+		return nil, ErrJobTimedOut
 	}
+
+	tout.Stop()
+	return payload, nil
 }
 
-/*
-SendWorkTimedAsync - Send a timed job to a worker without blocking, and optionally
-send the result to a receiving closure. You may set the closure to nil if no
-further actions are required.
-*/
-func (pool *WorkPool) SendWorkTimedAsync(
-	milliTimeout time.Duration,
-	jobData interface{},
-	after func(interface{}, error),
-) {
-	atomic.AddInt32(&pool.pendingAsyncJobs, 1)
-	go func() {
-		defer atomic.AddInt32(&pool.pendingAsyncJobs, -1)
-		result, err := pool.SendWorkTimed(milliTimeout, jobData)
-		if after != nil {
-			after(result, err)
-		}
-	}()
-}
+// SetSize changes the total number of workers in the Pool. This can be called
+// by any goroutine at any time unless the Pool has been stopped, in which case
+// a panic will occur.
+func (p *Pool) SetSize(n int) {
+	p.workerMut.Lock()
+	defer p.workerMut.Unlock()
 
-/*
-SendWork - Send a job to a worker and return the result, this is a synchronous call.
-*/
-func (pool *WorkPool) SendWork(jobData interface{}) (interface{}, error) {
-	pool.statusMutex.RLock()
-	defer pool.statusMutex.RUnlock()
-
-	if pool.isRunning() {
-		if chosen, _, ok := reflect.Select(pool.selects); ok && chosen >= 0 {
-			pool.workers[chosen].jobChan <- jobData
-			result, open := <-pool.workers[chosen].outputChan
-
-			if !open {
-				return nil, ErrWorkerClosed
-			}
-			return result, nil
-		}
-		return nil, ErrWorkerClosed
+	lWorkers := len(p.workers)
+	if lWorkers == n {
+		return
 	}
-	return nil, ErrPoolNotRunning
-}
 
-/*
-SendWorkAsync - Send a job to a worker without blocking, and optionally send the
-result to a receiving closure. You may set the closure to nil if no further actions
-are required.
-*/
-func (pool *WorkPool) SendWorkAsync(jobData interface{}, after func(interface{}, error)) {
-	atomic.AddInt32(&pool.pendingAsyncJobs, 1)
-	go func() {
-		defer atomic.AddInt32(&pool.pendingAsyncJobs, -1)
-		result, err := pool.SendWork(jobData)
-		if after != nil {
-			after(result, err)
-		}
-	}()
-}
-
-/*
-NumPendingAsyncJobs - Get the current count of async jobs either in flight, or waiting for a worker
-*/
-func (pool *WorkPool) NumPendingAsyncJobs() int32 {
-	return atomic.LoadInt32(&pool.pendingAsyncJobs)
-}
-
-/*
-NumWorkers - Number of workers in the pool
-*/
-func (pool *WorkPool) NumWorkers() int {
-	return len(pool.workers)
-}
-
-type liveVarAccessor func() string
-
-func (a liveVarAccessor) String() string {
-	return a()
-}
-
-/*
-PublishExpvarMetrics - Publishes the NumWorkers and NumPendingAsyncJobs to expvars
-*/
-func (pool *WorkPool) PublishExpvarMetrics(poolName string) {
-	ret := expvar.NewMap(poolName)
-	asyncJobsFn := func() string {
-		return strconv.FormatInt(int64(pool.NumPendingAsyncJobs()), 10)
+	// Add extra workers if N > len(workers)
+	for i := lWorkers; i < n; i++ {
+		p.workers = append(p.workers, newWorkerWrapper(p.reqChan, p.ctor()))
 	}
-	numWorkersFn := func() string {
-		return strconv.FormatInt(int64(pool.NumWorkers()), 10)
+
+	// Asynchronously stop all workers > N
+	for i := n; i < lWorkers; i++ {
+		p.workers[i].stop()
 	}
-	ret.Set("pendingAsyncJobs", liveVarAccessor(asyncJobsFn))
-	ret.Set("numWorkers", liveVarAccessor(numWorkersFn))
+
+	// Synchronously wait for all workers > N to stop
+	for i := n; i < lWorkers; i++ {
+		p.workers[i].join()
+	}
+
+	// Remove stopped workers from slice
+	p.workers = p.workers[:n]
 }
+
+// GetSize returns the current size of the pool.
+func (p *Pool) GetSize() int {
+	p.workerMut.Lock()
+	defer p.workerMut.Unlock()
+
+	return len(p.workers)
+}
+
+// Close will terminate all workers and close the job channel of this Pool.
+func (p *Pool) Close() {
+	p.SetSize(0)
+	close(p.reqChan)
+}
+
+//------------------------------------------------------------------------------
