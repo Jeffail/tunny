@@ -23,6 +23,7 @@ package tunny
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -106,7 +107,8 @@ type Pool struct {
 	workers []*workerWrapper
 	reqChan chan workRequest
 
-	workerMut sync.Mutex
+	workerMut  sync.Mutex
+	queuedJobs int64
 }
 
 // New creates a new Pool of workers that starts with n workers. You must
@@ -147,6 +149,8 @@ func NewCallback(n int) *Pool {
 // result. Process can be called safely by any goroutines, but will panic if the
 // Pool has been stopped.
 func (p *Pool) Process(payload interface{}) interface{} {
+	atomic.AddInt64(&p.queuedJobs, 1)
+
 	request, open := <-p.reqChan
 	if !open {
 		panic(ErrPoolNotRunning)
@@ -159,6 +163,7 @@ func (p *Pool) Process(payload interface{}) interface{} {
 		panic(ErrWorkerClosed)
 	}
 
+	atomic.AddInt64(&p.queuedJobs, -1)
 	return payload
 }
 
@@ -170,6 +175,9 @@ func (p *Pool) ProcessTimed(
 	payload interface{},
 	timeout time.Duration,
 ) (interface{}, error) {
+	atomic.AddInt64(&p.queuedJobs, 1)
+	defer atomic.AddInt64(&p.queuedJobs, -1)
+
 	tout := time.NewTimer(timeout)
 
 	var request workRequest
@@ -203,6 +211,11 @@ func (p *Pool) ProcessTimed(
 
 	tout.Stop()
 	return payload, nil
+}
+
+// QueueLength returns the current count of pending queued jobs.
+func (p *Pool) QueueLength() int64 {
+	return atomic.LoadInt64(&p.queuedJobs)
 }
 
 // SetSize changes the total number of workers in the Pool. This can be called

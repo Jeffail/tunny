@@ -274,3 +274,42 @@ func TestCustomWorker(t *testing.T) {
 }
 
 //------------------------------------------------------------------------------
+
+func BenchmarkFuncJob(b *testing.B) {
+	pool := NewFunc(10, func(in interface{}) interface{} {
+		intVal := in.(int)
+		return intVal * 2
+	})
+	defer pool.Close()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		ret := pool.Process(10)
+		if exp, act := 20, ret.(int); exp != act {
+			b.Errorf("Wrong result: %v != %v", act, exp)
+		}
+	}
+}
+
+func BenchmarkFuncTimedJob(b *testing.B) {
+	pool := NewFunc(10, func(in interface{}) interface{} {
+		intVal := in.(int)
+		return intVal * 2
+	})
+	defer pool.Close()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		ret, err := pool.ProcessTimed(10, time.Second)
+		if err != nil {
+			b.Error(err)
+		}
+		if exp, act := 20, ret.(int); exp != act {
+			b.Errorf("Wrong result: %v != %v", act, exp)
+		}
+	}
+}
+
+//------------------------------------------------------------------------------
