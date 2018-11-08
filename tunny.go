@@ -103,12 +103,13 @@ func (w *callbackWorker) Terminate()       {}
 // goroutine. The Pool can initialize, expand, compress and close the workers,
 // as well as processing jobs with the workers synchronously.
 type Pool struct {
+	queuedJobs int64
+
 	ctor    func() Worker
 	workers []*workerWrapper
 	reqChan chan workRequest
 
-	workerMut  sync.Mutex
-	queuedJobs int64
+	workerMut sync.Mutex
 }
 
 // New creates a new Pool of workers that starts with n workers. You must
