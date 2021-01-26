@@ -21,6 +21,7 @@
 package tunny
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -218,7 +219,7 @@ func (p *Pool) ProcessTimed(
 // the result. If the context cancels before the job has finished the worker will
 // be interrupted and ErrJobTimedOut will be returned. ProcessCtx can be
 // called safely by any goroutines.
-func (p *Pool) ProcessCtx(ctx context.Context, i interface{}) (interface{}, error) {
+func (p *Pool) ProcessCtx(ctx context.Context, payload interface{}) (interface{}, error) {
 	atomic.AddInt64(&p.queuedJobs, 1)
 	defer atomic.AddInt64(&p.queuedJobs, -1)
 
@@ -231,14 +232,14 @@ func (p *Pool) ProcessCtx(ctx context.Context, i interface{}) (interface{}, erro
 			return nil, ErrPoolNotRunning
 		}
 	case <-ctx.Done():
-		return nil, ErrJobTimedOut
+		return nil, ctx.Err()
 	}
 
 	select {
 	case request.jobChan <- payload:
 	case <-ctx.Done():
 		request.interruptFunc()
-		return nil, ErrJobTimedOut
+		return nil, ctx.Err()
 	}
 
 	select {
@@ -248,7 +249,7 @@ func (p *Pool) ProcessCtx(ctx context.Context, i interface{}) (interface{}, erro
 		}
 	case <-ctx.Done():
 		request.interruptFunc()
-		return nil, ErrJobTimedOut
+		return nil, ctx.Err()
 	}
 
 	return payload, nil
