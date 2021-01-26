@@ -80,6 +80,15 @@ if err == tunny.ErrJobTimedOut {
 }
 ```
 
+You can also use the context from the request (or any other context) to handle timeouts and deadlines. Simply replace the `Process` call to the following:
+
+``` go
+result, err := pool.ProcessCtx(r.Context(), input)
+if err == context.DeadlineExceeded {
+	http.Error(w, "Request timed out", http.StatusRequestTimeout)
+}
+```
+
 ## Changing Pool Size
 
 The size of a Tunny pool can be changed at any time with `SetSize(int)`:
