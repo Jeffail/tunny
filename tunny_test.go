@@ -108,21 +108,39 @@ func TestFuncJobTimed(t *testing.T) {
 }
 
 func TestFuncJobCtx(t *testing.T) {
-	pool := NewFunc(10, func(in interface{}) interface{} {
-		intVal := in.(int)
-		return intVal * 2
-	})
-	defer pool.Close()
+	t.Run("Completes when ctx not canceled", func(t *testing.T) {
+		pool := NewFunc(10, func(in interface{}) interface{} {
+			intVal := in.(int)
+			return intVal * 2
+		})
+		defer pool.Close()
 
-	for i := 0; i < 10; i++ {
-		ret, err := pool.ProcessCtx(context.Background(), 10)
-		if err != nil {
-			t.Fatalf("Failed to process: %v", err)
+		for i := 0; i < 10; i++ {
+			ret, err := pool.ProcessCtx(context.Background(), 10)
+			if err != nil {
+				t.Fatalf("Failed to process: %v", err)
+			}
+			if exp, act := 20, ret.(int); exp != act {
+				t.Errorf("Wrong result: %v != %v", act, exp)
+			}
 		}
-		if exp, act := 20, ret.(int); exp != act {
-			t.Errorf("Wrong result: %v != %v", act, exp)
+	})
+
+	t.Run("Returns err when ctx canceled", func(t *testing.T) {
+		pool := NewFunc(1, func(in interface{}) interface{} {
+			intVal := in.(int)
+			<-time.After(time.Millisecond)
+			return intVal * 2
+		})
+		defer pool.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		defer cancel()
+		_, act := pool.ProcessCtx(ctx, 10)
+		if exp := context.DeadlineExceeded; exp != act {
+			t.Errorf("Wrong error returned: %v != %v", act, exp)
 		}
-	}
+	})
 }
 
 func TestCallbackJob(t *testing.T) {
