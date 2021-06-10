@@ -285,6 +285,7 @@ func (p *Pool) SetSize(n int) {
 	// Synchronously wait for all workers > N to stop
 	for i := n; i < lWorkers; i++ {
 		p.workers[i].join()
+		p.workers[i] = nil
 	}
 
 	// Remove stopped workers from slice
