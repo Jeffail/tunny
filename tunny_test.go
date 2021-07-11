@@ -187,7 +187,7 @@ func TestTimedJobsAfterClose(t *testing.T) {
 	})
 	pool.Close()
 
-	_, act := pool.ProcessTimed(10, time.Duration(1))
+	_, act := pool.ProcessTimed(10, time.Duration(10*time.Millisecond))
 	if exp := ErrPoolNotRunning; exp != act {
 		t.Errorf("Wrong error returned: %v != %v", act, exp)
 	}
