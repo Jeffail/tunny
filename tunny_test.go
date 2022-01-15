@@ -31,7 +31,7 @@ import (
 //------------------------------------------------------------------------------
 
 func TestPoolSizeAdjustment(t *testing.T) {
-	pool := NewFunc(10, func(interface{}) interface{} { return "foo" })
+	pool := NewFunc(10, func(interface{}) (interface{}, error) { return "foo", nil })
 	if exp, act := 10, len(pool.workers); exp != act {
 		t.Errorf("Wrong size of pool: %v != %v", act, exp)
 	}
@@ -62,7 +62,11 @@ func TestPoolSizeAdjustment(t *testing.T) {
 	}
 
 	// Finally, make sure we still have actual active workers.
-	if exp, act := "foo", pool.Process(0).(string); exp != act {
+	v, err := pool.Process(0)
+	if err != nil {
+		t.Errorf("Should not got error: %v", err)
+	}
+	if exp, act := "foo", v.(string); exp != act {
 		t.Errorf("Wrong result: %v != %v", act, exp)
 	}
 
@@ -75,14 +79,17 @@ func TestPoolSizeAdjustment(t *testing.T) {
 //------------------------------------------------------------------------------
 
 func TestFuncJob(t *testing.T) {
-	pool := NewFunc(10, func(in interface{}) interface{} {
+	pool := NewFunc(10, func(in interface{}) (interface{}, error) {
 		intVal := in.(int)
-		return intVal * 2
+		return intVal * 2, nil
 	})
 	defer pool.Close()
 
 	for i := 0; i < 10; i++ {
-		ret := pool.Process(10)
+		ret, err := pool.Process(10)
+		if err != nil {
+			t.Errorf("Should not got error: %v", err)
+		}
 		if exp, act := 20, ret.(int); exp != act {
 			t.Errorf("Wrong result: %v != %v", act, exp)
 		}
@@ -90,9 +97,9 @@ func TestFuncJob(t *testing.T) {
 }
 
 func TestFuncJobTimed(t *testing.T) {
-	pool := NewFunc(10, func(in interface{}) interface{} {
+	pool := NewFunc(10, func(in interface{}) (interface{}, error) {
 		intVal := in.(int)
-		return intVal * 2
+		return intVal * 2, nil
 	})
 	defer pool.Close()
 
@@ -109,9 +116,9 @@ func TestFuncJobTimed(t *testing.T) {
 
 func TestFuncJobCtx(t *testing.T) {
 	t.Run("Completes when ctx not canceled", func(t *testing.T) {
-		pool := NewFunc(10, func(in interface{}) interface{} {
+		pool := NewFunc(10, func(in interface{}) (interface{}, error) {
 			intVal := in.(int)
-			return intVal * 2
+			return intVal * 2, nil
 		})
 		defer pool.Close()
 
@@ -127,15 +134,16 @@ func TestFuncJobCtx(t *testing.T) {
 	})
 
 	t.Run("Returns err when ctx canceled", func(t *testing.T) {
-		pool := NewFunc(1, func(in interface{}) interface{} {
+		pool := NewFunc(1, func(in interface{}) (interface{}, error) {
 			intVal := in.(int)
-			<-time.After(time.Millisecond)
-			return intVal * 2
+			<-time.After(time.Millisecond * 100)
+			return intVal * 2, nil
 		})
 		defer pool.Close()
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 		defer cancel()
+		
 		_, act := pool.ProcessCtx(ctx, 10)
 		if exp := context.DeadlineExceeded; exp != act {
 			t.Errorf("Wrong error returned: %v != %v", act, exp)
@@ -144,21 +152,24 @@ func TestFuncJobCtx(t *testing.T) {
 }
 
 func TestCallbackJob(t *testing.T) {
-	pool := NewCallback(10)
+	pool := NewCallback[interface{}, interface{}](10)
 	defer pool.Close()
 
 	var counter int32
 	for i := 0; i < 10; i++ {
-		ret := pool.Process(func() {
+		ret, err := pool.Process(func() {
 			atomic.AddInt32(&counter, 1)
 		})
+		if err != nil {
+			t.Errorf("Should not got error: %d %v", i, err)
+		}
 		if ret != nil {
 			t.Errorf("Non-nil callback response: %v", ret)
 		}
 	}
 
-	ret := pool.Process("foo")
-	if exp, act := ErrJobNotFunc, ret; exp != act {
+	_, err := pool.Process("foo")
+	if exp, act := ErrJobNotFunc, err; exp != act {
 		t.Errorf("Wrong result from non-func: %v != %v", act, exp)
 	}
 
@@ -168,10 +179,10 @@ func TestCallbackJob(t *testing.T) {
 }
 
 func TestTimeout(t *testing.T) {
-	pool := NewFunc(1, func(in interface{}) interface{} {
+	pool := NewFunc(1, func(in interface{}) (interface{}, error) {
 		intVal := in.(int)
 		<-time.After(time.Millisecond)
-		return intVal * 2
+		return intVal * 2, nil
 	})
 	defer pool.Close()
 
@@ -182,8 +193,8 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestTimedJobsAfterClose(t *testing.T) {
-	pool := NewFunc(1, func(in interface{}) interface{} {
-		return 1
+	pool := NewFunc(1, func(in interface{}) (interface{}, error) {
+		return 1, nil
 	})
 	pool.Close()
 
@@ -194,8 +205,8 @@ func TestTimedJobsAfterClose(t *testing.T) {
 }
 
 func TestJobsAfterClose(t *testing.T) {
-	pool := NewFunc(1, func(in interface{}) interface{} {
-		return 1
+	pool := NewFunc(1, func(in interface{}) (interface{}, error) {
+		return 1, nil
 	})
 	pool.Close()
 
@@ -214,12 +225,12 @@ func TestParallelJobs(t *testing.T) {
 	jobGroup := sync.WaitGroup{}
 	testGroup := sync.WaitGroup{}
 
-	pool := NewFunc(nWorkers, func(in interface{}) interface{} {
+	pool := NewFunc(nWorkers, func(in interface{}) (interface{}, error) {
 		jobGroup.Done()
 		jobGroup.Wait()
 
 		intVal := in.(int)
-		return intVal * 2
+		return intVal * 2, nil
 	})
 	defer pool.Close()
 
@@ -229,7 +240,10 @@ func TestParallelJobs(t *testing.T) {
 
 		for i := 0; i < nWorkers; i++ {
 			go func() {
-				ret := pool.Process(10)
+				ret, err := pool.Process(10)
+				if err != nil {
+					t.Errorf("Should not got error: %v", err)
+				}
 				if exp, act := 20, ret.(int); exp != act {
 					t.Errorf("Wrong result: %v != %v", act, exp)
 				}
@@ -250,12 +264,12 @@ type mockWorker struct {
 	terminated     bool
 }
 
-func (m *mockWorker) Process(in interface{}) interface{} {
+func (m *mockWorker) Process(in interface{}) (interface{}, error) {
 	select {
 	case <-m.blockProcChan:
 	case <-m.interruptChan:
 	}
-	return in
+	return in, nil
 }
 
 func (m *mockWorker) BlockUntilReady() {
@@ -271,7 +285,7 @@ func (m *mockWorker) Terminate() {
 }
 
 func TestCustomWorker(t *testing.T) {
-	pool := New(1, func() Worker {
+	pool := New(1, func() Worker[interface{}, interface{}] {
 		return &mockWorker{
 			blockProcChan:  make(chan struct{}),
 			blockReadyChan: make(chan struct{}),
@@ -300,7 +314,11 @@ func TestCustomWorker(t *testing.T) {
 	}
 
 	close(worker1.blockProcChan)
-	if exp, act := 10, pool.Process(10).(int); exp != act {
+	v, err := pool.Process(10)
+	if err != nil {
+		t.Errorf("Should not got error: %v", err)
+	}
+	if exp, act := 10, v.(int); exp != act {
 		t.Errorf("Wrong result: %v != %v", act, exp)
 	}
 
@@ -313,16 +331,19 @@ func TestCustomWorker(t *testing.T) {
 //------------------------------------------------------------------------------
 
 func BenchmarkFuncJob(b *testing.B) {
-	pool := NewFunc(10, func(in interface{}) interface{} {
+	pool := NewFunc(10, func(in interface{})(interface{}, error) {
 		intVal := in.(int)
-		return intVal * 2
+		return intVal * 2, nil
 	})
 	defer pool.Close()
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ret := pool.Process(10)
+		ret, err := pool.Process(10)
+		if err != nil {
+			b.Errorf("Should not got error: %v", err)
+		}
 		if exp, act := 20, ret.(int); exp != act {
 			b.Errorf("Wrong result: %v != %v", act, exp)
 		}
@@ -330,9 +351,9 @@ func BenchmarkFuncJob(b *testing.B) {
 }
 
 func BenchmarkFuncTimedJob(b *testing.B) {
-	pool := NewFunc(10, func(in interface{}) interface{} {
+	pool := NewFunc(10, func(in interface{}) (interface{}, error) {
 		intVal := in.(int)
-		return intVal * 2
+		return intVal * 2, nil
 	})
 	defer pool.Close()
 
