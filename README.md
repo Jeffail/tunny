@@ -2,6 +2,9 @@
 
 [![godoc for Jeffail/tunny][1]][2]
 [![goreportcard for Jeffail/tunny][3]][4]
+![Go v1.18][5]
+
+> Notice: Worker handler changed from `func(any) any` to `func[T, U any](T) (U, error)`.
 
 Tunny is a Golang library for spawning and managing a goroutine pool, allowing
 you to limit work coming from any number of goroutines with a synchronous API.
@@ -43,12 +46,16 @@ import (
 func main() {
 	numCPUs := runtime.NumCPU()
 
-	pool := tunny.NewFunc(numCPUs, func(payload interface{}) interface{} {
+	// support generics go1.18
+	// pool := tunny.NewFunc(numCPUs, func(payload int) (string, error) {
+	//    return "", nil })
+
+	pool := tunny.NewFunc(numCPUs, func(payload interface{}) (interface{}, error) {
 		var result []byte
 
 		// TODO: Something CPU heavy with payload
 
-		return result
+		return result, nil
 	})
 	defer pool.Close()
 
@@ -61,7 +68,10 @@ func main() {
 
 		// Funnel this work into our pool. This call is synchronous and will
 		// block until the job is completed.
-		result := pool.Process(input)
+		result, err := pool.Process(input)
+		if err != nil {
+			_ = err // do something to error
+		}
 
 		w.Write(result.([]byte))
 	})
@@ -131,4 +141,5 @@ should not be relied upon.
 [2]: http://godoc.org/github.com/Jeffail/tunny
 [3]: https://goreportcard.com/badge/github.com/Jeffail/tunny
 [4]: https://goreportcard.com/report/Jeffail/tunny
+[5]: https://img.shields.io/badge/Go-v1.18-007d9c
 [tunny-worker]: https://godoc.org/github.com/Jeffail/tunny#Worker
