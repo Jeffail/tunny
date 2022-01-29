@@ -1,3 +1,3 @@
-module github.com/Jeffail/tunny
+module github.com/jeffail/tunny
 
 go 1.13
