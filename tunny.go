@@ -217,7 +217,7 @@ func (p *Pool) ProcessTimed(
 
 // ProcessCtx will use the Pool to process a payload and synchronously return
 // the result. If the context cancels before the job has finished the worker will
-// be interrupted and the appropriate context error will be returned. 
+// be interrupted and the appropriate context error will be returned.
 // ProcessCtx can be called safely by any goroutines.
 func (p *Pool) ProcessCtx(ctx context.Context, payload interface{}) (interface{}, error) {
 	atomic.AddInt64(&p.queuedJobs, 1)
