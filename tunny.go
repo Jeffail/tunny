@@ -152,7 +152,8 @@ func NewCallback(n int) *Pool {
 // Pool has been stopped.
 func (p *Pool) Process(payload interface{}) interface{} {
 	atomic.AddInt64(&p.queuedJobs, 1)
-
+	defer atomic.AddInt64(&p.queuedJobs, -1)
+	
 	request, open := <-p.reqChan
 	if !open {
 		panic(ErrPoolNotRunning)
@@ -164,8 +165,7 @@ func (p *Pool) Process(payload interface{}) interface{} {
 	if !open {
 		panic(ErrWorkerClosed)
 	}
-
-	atomic.AddInt64(&p.queuedJobs, -1)
+	
 	return payload
 }
 
