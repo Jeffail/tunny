@@ -60,6 +60,10 @@ type Worker interface {
 	// Terminate is called when a Worker is removed from the processing pool
 	// and is responsible for cleaning up any held resources.
 	Terminate()
+
+	// bindPool is called when a pool create a worker. this worker will bind
+	// that pool
+	BindPool(p *Pool) Worker
 }
 
 //------------------------------------------------------------------------------
@@ -67,6 +71,7 @@ type Worker interface {
 // closureWorker is a minimal Worker implementation that simply wraps a
 // func(interface{}) interface{}
 type closureWorker struct {
+	pool *Pool
 	processor func(interface{}) interface{}
 }
 
@@ -77,13 +82,16 @@ func (w *closureWorker) Process(payload interface{}) interface{} {
 func (w *closureWorker) BlockUntilReady() {}
 func (w *closureWorker) Interrupt()       {}
 func (w *closureWorker) Terminate()       {}
+func (w *closureWorker) BindPool(p *Pool) Worker {w.pool = p; return w}
 
 //------------------------------------------------------------------------------
 
 // callbackWorker is a minimal Worker implementation that attempts to cast
 // each job into func() and either calls it if successful or returns
 // ErrJobNotFunc.
-type callbackWorker struct{}
+type callbackWorker struct{
+	pool *Pool
+}
 
 func (w *callbackWorker) Process(payload interface{}) interface{} {
 	f, ok := payload.(func())
@@ -97,6 +105,7 @@ func (w *callbackWorker) Process(payload interface{}) interface{} {
 func (w *callbackWorker) BlockUntilReady() {}
 func (w *callbackWorker) Interrupt()       {}
 func (w *callbackWorker) Terminate()       {}
+func (w *callbackWorker) BindPool(p *Pool) Worker {w.pool = p; return w}
 
 //------------------------------------------------------------------------------
 
@@ -255,6 +264,19 @@ func (p *Pool) ProcessCtx(ctx context.Context, payload interface{}) (interface{}
 	return payload, nil
 }
 
+// 
+func (p *Pool) Submit(payload interface{}) bool {
+	atomic.AddInt64(&p.queuedJobs, 1)
+
+	request, open := <-p.reqChan
+	if !open {
+		panic(ErrPoolNotRunning)
+	}
+
+	request.asyncJobChan <- payload
+	return true
+}
+
 // QueueLength returns the current count of pending queued jobs.
 func (p *Pool) QueueLength() int64 {
 	return atomic.LoadInt64(&p.queuedJobs)
@@ -274,7 +296,7 @@ func (p *Pool) SetSize(n int) {
 
 	// Add extra workers if N > len(workers)
 	for i := lWorkers; i < n; i++ {
-		p.workers = append(p.workers, newWorkerWrapper(p.reqChan, p.ctor()))
+		p.workers = append(p.workers, newWorkerWrapper(p.reqChan, p.ctor().BindPool(p)))
 	}
 
 	// Asynchronously stop all workers > N

@@ -20,6 +20,8 @@
 
 package tunny
 
+import "sync/atomic"
+
 //------------------------------------------------------------------------------
 
 // workRequest is a struct containing context representing a workers intention
@@ -27,6 +29,9 @@ package tunny
 type workRequest struct {
 	// jobChan is used to send the payload to this worker.
 	jobChan chan<- interface{}
+
+	// jobChan is used to send the payload to this worker.
+	asyncJobChan chan<- interface{}
 
 	// retChan is used to read the result from this worker.
 	retChan <-chan interface{}
@@ -80,7 +85,7 @@ func (w *workerWrapper) interrupt() {
 }
 
 func (w *workerWrapper) run() {
-	jobChan, retChan := make(chan interface{}), make(chan interface{})
+	jobChan, retChan, asyncJobChan := make(chan interface{}), make(chan interface{}), make(chan interface{})
 	defer func() {
 		w.worker.Terminate()
 		close(retChan)
@@ -94,6 +99,7 @@ func (w *workerWrapper) run() {
 		case w.reqChan <- workRequest{
 			jobChan:       jobChan,
 			retChan:       retChan,
+			asyncJobChan:  asyncJobChan,
 			interruptFunc: w.interrupt,
 		}:
 			select {
@@ -104,6 +110,9 @@ func (w *workerWrapper) run() {
 				case <-w.interruptChan:
 					w.interruptChan = make(chan struct{})
 				}
+			case payload := <-asyncJobChan:
+				_ = w.worker.Process(payload)
+				atomic.AddInt64(&w.worker.(*callbackWorker).pool.queuedJobs, -1)
 			case <-w.interruptChan:
 				w.interruptChan = make(chan struct{})
 			}

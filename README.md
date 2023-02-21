@@ -89,6 +89,24 @@ if err == context.DeadlineExceeded {
 }
 ```
 
+## Submitting Async Tasks
+
+`pool.Process()` is a sync API, and it will not return until the task is finished. Sometimes we need to submit async task. For async task, one simple way is: (see issue #9)
+
+```go
+go func() {
+    foo := pool.Process(MyTask)
+}()
+```
+
+However, the above method cannot control the number growth of goroutines. If there are 4 workers but 10000 tasks, the above method will create 10000 goroutines. But we wish these are only 4 worker goroutines running these tasks. In this case, `pool.Submit()` is a better choice:
+``` go
+pool.Submit(func() {
+	// put your task here
+	MyTask()
+})
+```
+
 ## Changing Pool Size
 
 The size of a Tunny pool can be changed at any time with `SetSize(int)`:

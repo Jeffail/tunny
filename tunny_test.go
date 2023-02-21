@@ -241,6 +241,74 @@ func TestParallelJobs(t *testing.T) {
 	}
 }
 
+func TestSubmitJob(t *testing.T) {
+	pool := NewCallback(10)
+	defer pool.Close()
+
+	jobGroup := sync.WaitGroup{}
+	jobGroup.Add(10)
+
+	var counter int32
+	for i := 0; i < 10; i++ {
+		ok := pool.Submit(func() {
+			time.Sleep(time.Millisecond)
+			atomic.AddInt32(&counter, 1)
+			jobGroup.Done()
+		})
+		if ok != true {
+			t.Error("Failed to submit callback")
+		}
+	}
+	if exp, act := int32(10), counter; exp != act {
+		t.Logf("Haven't finish, so result is wrong: %v != %v", act, exp)
+	}
+	jobGroup.Wait()
+	if exp, act := int32(10), counter; exp != act {
+		t.Errorf("Wrong result: %v != %v", act, exp)
+	}
+}
+
+func TestSubmitJobBlock(t *testing.T) {
+	pool := NewCallback(10)
+	defer pool.Close()
+
+	jobGroup := sync.WaitGroup{}
+	jobGroup.Add(11)
+
+	var counter int32
+	t1 := time.Now()
+	for i := 0; i < 10; i++ {
+		ok := pool.Submit(func() {
+			time.Sleep(time.Millisecond)
+			atomic.AddInt32(&counter, 1)
+			jobGroup.Done()
+		})
+		if ok != true {
+			t.Error("Failed to submit callback")
+		}
+	}
+
+	t2 := time.Now()
+
+	ok := pool.Submit(func() {
+		time.Sleep(time.Millisecond)
+		atomic.AddInt32(&counter, 1)
+		jobGroup.Done()
+	})
+	if ok != true {
+		t.Error("Failed to submit callback")
+	}
+	t3 := time.Now()
+
+	if t3.Sub(t2).Microseconds() - t2.Sub(t1).Microseconds() < 800 {
+		t.Error("Job submitting didn't cause block")
+	}
+	jobGroup.Wait()
+	if exp, act := int32(11), counter; exp != act {
+		t.Errorf("Wrong result: %v != %v", act, exp)
+	}
+}
+
 //------------------------------------------------------------------------------
 
 type mockWorker struct {
@@ -268,6 +336,10 @@ func (m *mockWorker) Interrupt() {
 
 func (m *mockWorker) Terminate() {
 	m.terminated = true
+}
+
+func (m *mockWorker) BindPool(p *Pool) Worker {
+	return m
 }
 
 func TestCustomWorker(t *testing.T) {
