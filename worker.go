@@ -48,6 +48,9 @@ type workerWrapper struct {
 	// reqChan is NOT owned by this type, it is used to send requests for work.
 	reqChan chan<- workRequest
 
+	// reqAllChan IS owned by this type, and is used to send the same request to every workerWrapper in the pool.
+	reqAllChan chan workRequest
+
 	// closeChan can be closed in order to cleanly shutdown this worker.
 	closeChan chan struct{}
 
@@ -62,6 +65,7 @@ func newWorkerWrapper(
 	w := workerWrapper{
 		worker:        worker,
 		interruptChan: make(chan struct{}),
+		reqAllChan:    make(chan workRequest),
 		reqChan:       reqChan,
 		closeChan:     make(chan struct{}),
 		closedChan:    make(chan struct{}),
@@ -90,8 +94,26 @@ func (w *workerWrapper) run() {
 	for {
 		// NOTE: Blocking here will prevent the worker from closing down.
 		w.worker.BlockUntilReady()
+
 		select {
 		case w.reqChan <- workRequest{
+			jobChan:       jobChan,
+			retChan:       retChan,
+			interruptFunc: w.interrupt,
+		}:
+			select {
+			case payload := <-jobChan:
+				result := w.worker.Process(payload)
+				select {
+				case retChan <- result:
+				case <-w.interruptChan:
+					w.interruptChan = make(chan struct{})
+				}
+			case <-w.interruptChan:
+				w.interruptChan = make(chan struct{})
+			}
+			// TODO clean up duplication
+		case w.reqAllChan <- workRequest{
 			jobChan:       jobChan,
 			retChan:       retChan,
 			interruptFunc: w.interrupt,

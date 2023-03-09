@@ -169,6 +169,31 @@ func (p *Pool) Process(payload interface{}) interface{} {
 	return payload
 }
 
+// ProcessAll will submit the same payload to every worker in the pool when it becomes available. The call will block
+// until all workers have processed the payload. It returns a slice containing the results from each worker.
+func (p *Pool) ProcessAll(payload interface{}) []interface{} {
+	var results = make([]interface{}, len(p.workers))
+	for i, worker := range p.workers {
+		atomic.AddInt64(&p.queuedJobs, 1)
+
+		// wait to receive the worker from its dedicated channel
+		request, open := <-worker.reqAllChan
+		if !open {
+			panic(ErrPoolNotRunning)
+		}
+
+		request.jobChan <- payload
+
+		payload, open = <-request.retChan
+		if !open {
+			panic(ErrWorkerClosed)
+		}
+		results[i] = payload
+		atomic.AddInt64(&p.queuedJobs, -1)
+	}
+	return results
+}
+
 // ProcessTimed will use the Pool to process a payload and synchronously return
 // the result. If the timeout occurs before the job has finished the worker will
 // be interrupted and ErrJobTimedOut will be returned. ProcessTimed can be

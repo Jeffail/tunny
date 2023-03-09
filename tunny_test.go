@@ -310,6 +310,30 @@ func TestCustomWorker(t *testing.T) {
 	}
 }
 
+func TestCustomWorkerProcessAll(t *testing.T) {
+	pool := New(2, func() Worker {
+		return &mockWorker{
+			blockProcChan:  make(chan struct{}),
+			blockReadyChan: make(chan struct{}),
+			interruptChan:  make(chan struct{}),
+		}
+	})
+
+	worker1, ok := pool.workers[0].worker.(*mockWorker)
+	worker2, ok := pool.workers[0].worker.(*mockWorker)
+
+	if !ok {
+		t.Fatal("Wrong type of worker in pool")
+	}
+
+	result := pool.ProcessAll(10)
+
+	pool.Close()
+	if !worker1.terminated {
+		t.Fatal("Worker was not terminated")
+	}
+}
+
 //------------------------------------------------------------------------------
 
 func BenchmarkFuncJob(b *testing.B) {
